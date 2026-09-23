@@ -1,0 +1,3202 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920,initial-scale=1">
+<title>Red Hat Lightwell — Životní cyklus aplikace</title>
+<style>
+:root {
+  --bg: #151515;
+  --panel: #212427;
+  --panel-hover: #2a2d31;
+  --text: #FFFFFF;
+  --text-muted: #C7C7C7;
+  --red: #EE0000;
+  --gold: #F0AB00;
+  --green: #3E8635;
+  --blue: #0066CC;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --transition: 300ms ease-out;
+  --grid: 8px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0d0d0d;
+  color: var(--text);
+  font-family: "Red Hat Display", "Red Hat Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 1.5;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  cursor: default;
+}
+
+body.cursor-hidden { cursor: none; }
+body.cursor-hidden * { cursor: none !important; }
+
+a { color: var(--blue); text-decoration: none; }
+
+/* ===================== STAGE (fit-to-screen) ===================== */
+#stage {
+  position: absolute; top: 0; left: 0;
+  width: 1920px; height: 1080px;
+  background: var(--bg);
+  transform-origin: 0 0;
+  overflow: hidden;
+}
+
+/* Scene-colored ambient glow behind content */
+#glow {
+  position: absolute; top: 0; left: 0;
+  width: 1920px; height: 1080px;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 900px 600px at 50% 40%, var(--glow-color, rgba(0,102,204,0.18)) 0%, rgba(0,0,0,0) 70%),
+    radial-gradient(ellipse 1400px 400px at 50% 110%, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0) 70%);
+  transition: background 0.9s ease-out;
+}
+#glow.glow-blue  { --glow-color: rgba(0,102,204,0.20); }
+#glow.glow-red   { --glow-color: rgba(238,0,0,0.20); }
+#glow.glow-gold  { --glow-color: rgba(240,171,0,0.16); }
+#glow.glow-green { --glow-color: rgba(62,134,53,0.24); }
+
+/* Subtle dot grid texture */
+#grid {
+  position: absolute; top: 0; left: 0;
+  width: 1920px; height: 1080px;
+  pointer-events: none; z-index: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 30%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 30%, transparent 100%);
+}
+
+/* Story progress bar: problem (red) -> solution (green) */
+#storyBar {
+  position: fixed; top: 0; left: 0;
+  height: 4px; width: 0%;
+  background: linear-gradient(90deg, var(--red) 0%, var(--gold) 45%, var(--green) 100%);
+  background-size: 1920px 4px;
+  z-index: 110;
+  transition: width 0.6s ease-out;
+  box-shadow: 0 0 12px rgba(240,171,0,0.35);
+}
+
+/* ===================== LAYOUT ===================== */
+#topBar {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px;
+  z-index: 100;
+  background: linear-gradient(180deg, rgba(21,21,21,0.95) 0%, rgba(21,21,21,0) 100%);
+  pointer-events: none;
+}
+#topBar > * { pointer-events: auto; }
+/* On the attract scene only Home and language hide; the autoplay toggle stays reachable */
+#topBar.hidden-bar { background: none; }
+#topBar.hidden-bar #homeBtn { opacity: 0; pointer-events: none; }
+#homeBtn, #langSwitch { transition: opacity var(--transition), background var(--transition), border-color var(--transition); }
+
+#homeBtn {
+  width: 56px; height: 56px;
+  background: none; border: 2px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 24px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+#homeBtn:hover, #homeBtn:active { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.4); }
+
+#langSwitch {
+  height: 40px; display: inline-flex; align-items: stretch;
+  background: var(--panel); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px; overflow: hidden;
+}
+#langSwitch button {
+  min-width: 48px; padding: 0 12px;
+  background: transparent; border: none; border-right: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-muted); font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+  cursor: pointer; transition: background var(--transition), color var(--transition);
+}
+#langSwitch button:last-child { border-right: none; }
+#langSwitch button:hover { background: var(--panel-hover); color: var(--text); }
+#langSwitch button.active { background: rgba(255,255,255,0.14); color: var(--text); }
+
+/* ===================== MAIN SCENES ===================== */
+main {
+  position: fixed; top: 0; left: 0;
+  width: 1920px; height: 1080px;
+  z-index: 1;
+}
+
+.scene {
+  position: absolute; top: 0; left: 0;
+  width: 1920px; height: 1080px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 64px 80px 120px;
+  opacity: 0;
+  transform: translateX(30px);
+  transition: opacity var(--transition), transform var(--transition);
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+.scene.active {
+  opacity: 1; transform: translateX(0);
+  pointer-events: auto;
+}
+
+.scene-title {
+  font-size: 42px; font-weight: 700;
+  text-align: center;
+  margin-bottom: 32px;
+  max-width: 1200px;
+}
+.scene-title .accent-red { color: var(--red); }
+.scene-title .accent-green { color: var(--green); }
+.scene-title .accent-blue { color: var(--blue); }
+
+/* ===================== NAVIGATION ===================== */
+#navigation {
+  position: fixed; bottom: 40px; left: 0; right: 0;
+  height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  gap: 24px;
+  z-index: 90;
+  transition: opacity var(--transition);
+}
+#navigation.hidden-nav { opacity: 0; pointer-events: none; }
+
+.nav-btn {
+  height: 56px; min-width: 120px;
+  padding: 0 24px;
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius);
+  color: var(--text); font-size: 16px; font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  transition: background var(--transition), opacity var(--transition);
+}
+.nav-btn:hover { background: var(--panel-hover); }
+.nav-btn:disabled { opacity: 0.3; cursor: default; }
+.nav-btn:disabled:hover { background: var(--panel); }
+
+#dots {
+  display: flex; gap: 12px; align-items: center;
+}
+.dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition);
+}
+.dot:hover { background: rgba(255,255,255,0.4); }
+.dot.active { background: var(--text); transform: scale(1.3); }
+.dot.dot-problem.active { background: var(--red); box-shadow: 0 0 10px rgba(238,0,0,0.6); }
+.dot.dot-solution.active { background: var(--green); box-shadow: 0 0 10px rgba(62,134,53,0.6); }
+.dot.dot-neutral.active { background: var(--blue); box-shadow: 0 0 10px rgba(0,102,204,0.6); }
+.dot.dot-done { background: rgba(255,255,255,0.45); }
+
+#nextBtn { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.35); }
+#nextBtn:hover { background: rgba(255,255,255,0.2); }
+
+/* ===================== MARKER BADGE ===================== */
+#marker {
+  position: fixed; top: 64px; right: 32px;
+  background: var(--panel);
+  border: 2px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font-size: 14px; font-weight: 600;
+  color: var(--gold);
+  z-index: 95;
+  display: flex; align-items: center; gap: 8px;
+  opacity: 0; transform: translateY(-10px);
+  transition: opacity var(--transition), transform var(--transition), border-color 0.5s ease-out, color 0.5s ease-out;
+  pointer-events: none;
+}
+#marker.visible {
+  opacity: 1; transform: translateY(0); pointer-events: auto;
+}
+#marker.upgraded {
+  border-color: var(--green);
+  color: var(--green);
+}
+#marker svg { flex-shrink: 0; }
+
+/* ===================== OVERLAY ===================== */
+#overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 200;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--transition);
+}
+#overlay.open { opacity: 1; pointer-events: auto; }
+
+#overlayBackdrop {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+}
+
+#overlayPanel {
+  position: absolute; top: 0; right: 0;
+  width: 520px; height: 100%;
+  background: var(--panel);
+  padding: 32px;
+  transform: translateX(100%);
+  transition: transform var(--transition);
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+#overlay.open #overlayPanel { transform: translateX(0); }
+#overlayPanel::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px;
+  background: var(--overlay-accent, var(--blue));
+}
+#overlayPanel.acc-red { --overlay-accent: var(--red); }
+#overlayPanel.acc-gold { --overlay-accent: var(--gold); }
+#overlayPanel.acc-green { --overlay-accent: var(--green); }
+#overlayPanel.acc-blue { --overlay-accent: var(--blue); }
+#overlayPanel.acc-red #overlayTitle { color: var(--red); }
+#overlayPanel.acc-gold #overlayTitle { color: var(--gold); }
+#overlayPanel.acc-green #overlayTitle { color: var(--green); }
+
+#overlayClose {
+  position: absolute; top: 16px; right: 16px;
+  width: 48px; height: 48px;
+  background: none; border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius);
+  color: var(--text); font-size: 28px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition);
+}
+#overlayClose:hover { background: rgba(255,255,255,0.1); }
+
+#overlayTitle {
+  font-size: 28px; font-weight: 700;
+  margin-bottom: 24px;
+  padding-right: 56px;
+}
+#overlayBody {
+  font-size: 18px; line-height: 1.6;
+  color: var(--text-muted);
+}
+#overlayBody .source {
+  margin-top: 16px; font-size: 14px;
+  color: rgba(255,255,255,0.4);
+  font-style: italic;
+}
+
+/* ===================== FOOTER ===================== */
+#disclaimer {
+  position: fixed; bottom: 8px; left: 0; right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255,255,255,0.3);
+  z-index: 80;
+  pointer-events: none;
+}
+
+/* ===================== COMMON COMPONENTS ===================== */
+.card {
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition), background var(--transition), box-shadow var(--transition);
+}
+.card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255,255,255,0.25);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.card:active { transform: translateY(-2px); }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap;
+}
+.badge-red { background: rgba(238,0,0,0.15); color: var(--red); border: 1px solid rgba(238,0,0,0.3); }
+.badge-green { background: rgba(62,134,53,0.15); color: var(--green); border: 1px solid rgba(62,134,53,0.3); }
+.badge-gold { background: rgba(240,171,0,0.15); color: var(--gold); border: 1px solid rgba(240,171,0,0.3); }
+.badge-blue { background: rgba(0,102,204,0.15); color: var(--blue); border: 1px solid rgba(0,102,204,0.3); }
+
+.cta-btn {
+  height: 56px; padding: 0 32px;
+  background: var(--green);
+  border: none; border-radius: var(--radius);
+  color: #fff; font-size: 18px; font-weight: 700;
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.cta-btn:hover { background: #4a9a40; transform: translateY(-2px); box-shadow: 0 4px 16px rgba(62,134,53,0.4); }
+.cta-btn:active { transform: translateY(0); }
+
+.cta-btn.cta-blue { background: var(--blue); }
+.cta-btn.cta-blue:hover { background: #0077ee; box-shadow: 0 4px 16px rgba(0,102,204,0.4); }
+
+.stat-tile {
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition);
+  min-width: 200px;
+}
+.stat-tile:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.25); }
+.stat-number {
+  font-size: 56px; font-weight: 800;
+  line-height: 1.1;
+}
+.stat-label {
+  font-size: 15px; color: var(--text-muted);
+  margin-top: 8px;
+}
+
+/* ===================== SCENE 0: ATTRACT ===================== */
+#scene0 {
+  padding: 0;
+  justify-content: center;
+  cursor: pointer;
+}
+.attract-content {
+  text-align: center;
+  z-index: 2;
+  position: relative;
+}
+.attract-content h1 {
+  font-size: 68px; font-weight: 800;
+  margin-bottom: 16px;
+  background: linear-gradient(90deg, #ffffff 0%, #ffffff 55%, #ff6b6b 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: #fff;
+}
+.attract-hero {
+  width: 200px; height: 200px; margin: 0 auto 28px;
+  position: relative;
+}
+.attract-hero .ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid rgba(238,0,0,0.5);
+  animation: ringPulse 2.6s ease-out infinite;
+}
+.attract-hero .ring:nth-child(2) { animation-delay: 0.9s; }
+.attract-hero .ring:nth-child(3) { animation-delay: 1.8s; }
+.attract-hero .hero-core {
+  position: absolute; inset: 40px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff4a4a, #a30000 70%);
+  box-shadow: 0 0 40px rgba(238,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+}
+@keyframes ringPulse {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+.attract-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 6px 16px; border-radius: 20px;
+  background: rgba(238,0,0,0.12); border: 1px solid rgba(238,0,0,0.35);
+  color: #fff; font-weight: 700; font-size: 15px; letter-spacing: 1px;
+  margin-bottom: 20px;
+}
+.attract-content .attract-sub {
+  font-size: 24px; color: var(--text-muted);
+  margin-bottom: 48px;
+}
+.attract-content .attract-cta {
+  font-size: 22px; color: var(--red);
+  font-weight: 600;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.packages-flow {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden; z-index: 1;
+}
+.flow-pkg {
+  position: absolute;
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px; font-weight: 500;
+  color: rgba(255,255,255,0.35);
+  white-space: nowrap;
+  animation: flowRight linear infinite;
+  will-change: transform;
+}
+.flow-pkg:nth-child(odd) { animation-name: flowLeft; }
+
+@keyframes flowRight {
+  0% { transform: translateX(-300px); }
+  100% { transform: translateX(2220px); }
+}
+@keyframes flowLeft {
+  0% { transform: translateX(2220px); }
+  100% { transform: translateX(-300px); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ===================== SCENE 1: ANATOMY ===================== */
+.anatomy-wrap { display: flex; align-items: center; gap: 56px; }
+.donut-wrap { width: 300px; text-align: center; flex-shrink: 0; }
+.donut { width: 260px; height: 260px; transform: rotate(-90deg); }
+.donut .ring-bg { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 22; }
+.donut .ring-oss {
+  fill: none; stroke: var(--gold); stroke-width: 22; stroke-linecap: round;
+  stroke-dasharray: 691; stroke-dashoffset: 691;
+  transition: stroke-dashoffset 1.6s cubic-bezier(.2,.7,.2,1);
+  filter: drop-shadow(0 0 8px rgba(240,171,0,0.5));
+}
+.donut .ring-own { fill: none; stroke: var(--blue); stroke-width: 22; stroke-linecap: round;
+  stroke-dasharray: 691; stroke-dashoffset: 691; transition: stroke-dashoffset 1.2s ease-out 1.4s; }
+.scene.active .donut .ring-oss { stroke-dashoffset: 69; }   /* 90 % of circumference */
+.scene.active .donut .ring-own { stroke-dashoffset: 622; }  /* remaining 10 % */
+.donut-label { position: relative; margin-top: -170px; height: 120px; }
+.donut-label .big { font-size: 56px; font-weight: 800; color: var(--gold); line-height: 1; }
+.donut-label .small { font-size: 14px; color: var(--text-muted); margin-top: 6px; }
+.donut-legend { display: flex; justify-content: center; gap: 16px; margin-top: 60px; font-size: 13px; color: var(--text-muted); }
+.donut-legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.donut-legend .lg-oss::before { background: var(--gold); }
+.donut-legend .lg-own::before { background: var(--blue); }
+
+.anatomy-container {
+  width: 900px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+.anatomy-layer {
+  padding: 16px 24px;
+  cursor: pointer;
+  transition: background var(--transition);
+  display: flex; align-items: center; gap: 12px;
+  min-height: 56px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.anatomy-layer:last-child { border-bottom: none; }
+.anatomy-layer:hover { background: rgba(255,255,255,0.05); }
+.anatomy-layer .layer-icon {
+  width: 32px; height: 32px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.anatomy-layer .layer-label { font-weight: 600; font-size: 16px; }
+.anatomy-layer .layer-pct { color: var(--text-muted); font-size: 14px; }
+
+.anatomy-layer.layer-business { background: rgba(0,102,204,0.1); border-left: 4px solid var(--blue); }
+.anatomy-layer.layer-runtime { background: rgba(238,0,0,0.08); border-left: 4px solid var(--red); }
+
+.libs-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  padding: 16px 24px;
+  background: rgba(255,255,255,0.02);
+}
+.lib-tile {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 10px 8px;
+  font-size: 12px; font-weight: 500;
+  text-align: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  min-height: 56px;
+  display: flex; align-items: center; justify-content: center;
+}
+.lib-tile:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: var(--text); }
+.lib-tile.highlight {
+  background: rgba(240,171,0,0.15);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 700;
+  box-shadow: 0 0 16px rgba(240,171,0,0.2);
+}
+.scene-stat {
+  font-size: 16px; color: var(--text-muted);
+  margin-top: 16px; text-align: center;
+}
+
+/* ===================== SCENE 2: VULNERABILITY GAP ===================== */
+.timeline-area {
+  width: 1100px;
+  margin-bottom: 32px;
+}
+.timeline-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 24px; font-size: 14px; color: var(--text-muted);
+}
+.timeline-tracks {
+  position: relative;
+  height: 180px;
+  border-left: 2px solid rgba(255,255,255,0.2);
+}
+.timeline-track {
+  position: absolute; left: 0; right: 0;
+  height: 40px;
+  border-radius: 6px;
+  display: flex; align-items: center;
+  padding: 0 16px;
+  font-size: 14px; font-weight: 600;
+}
+.track-attacker {
+  top: 16px;
+  width: 32%;
+  font-size: 13px;
+  background: linear-gradient(90deg, rgba(238,0,0,0.15), rgba(238,0,0,0.35));
+  border: 1px solid var(--red);
+  color: #ff8a8a;
+  transition: width 1.2s cubic-bezier(.3,.8,.3,1);
+  overflow: visible;
+}
+.track-attacker .boom {
+  position: absolute; right: -22px; top: 50%; transform: translateY(-50%) scale(0);
+  width: 44px; height: 44px; border-radius: 50%;
+  background: radial-gradient(circle, #ff5a5a, var(--red) 60%);
+  box-shadow: 0 0 24px rgba(238,0,0,0.8);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 20px;
+  transition: transform 0.4s cubic-bezier(.2,1.6,.4,1) 1.1s;
+}
+.track-enterprise {
+  bottom: 16px;
+  width: 90%;
+  background: rgba(0,102,204,0.12);
+  border: 1px solid rgba(0,102,204,0.4);
+  color: #7fb8ff;
+  padding: 0; overflow: hidden;
+  transition: width 2.6s cubic-bezier(.4,.1,.3,1);
+}
+.track-enterprise .seg {
+  flex: 1; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.3px;
+  border-right: 1px solid rgba(255,255,255,0.15);
+  white-space: nowrap; overflow: hidden;
+}
+.track-enterprise .seg:last-child { border-right: none; }
+.track-enterprise .seg-1 { background: rgba(0,102,204,0.18); }
+.track-enterprise .seg-2 { background: rgba(0,102,204,0.28); }
+.track-enterprise .seg-3 { background: rgba(0,102,204,0.38); }
+.track-enterprise .seg-4 { background: rgba(0,102,204,0.5); color: #fff; }
+.timeline-tracks.collapsed .track-attacker { width: 3%; }
+.timeline-tracks.collapsed .track-enterprise { width: 3%; }
+.timeline-tracks.collapsed .track-attacker .boom { transform: translateY(-50%) scale(0); }
+.timeline-tracks.playing .track-attacker .boom { transform: translateY(-50%) scale(1); }
+.timeline-tracks.collapsed .vuln-gap { opacity: 0; }
+.vuln-gap {
+  position: absolute;
+  top: 60px; bottom: 60px;
+  left: 32%; right: 10%;
+  background: repeating-linear-gradient(45deg, rgba(240,171,0,0.08), rgba(240,171,0,0.08) 10px, rgba(240,171,0,0.16) 10px, rgba(240,171,0,0.16) 20px);
+  border: 2px dashed var(--gold);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800;
+  color: var(--gold);
+  letter-spacing: 3px;
+  opacity: 1;
+  transition: opacity 0.8s ease-out 1.8s;
+  text-shadow: 0 0 12px rgba(240,171,0,0.5);
+}
+.timeline-tracks.playing .vuln-gap { animation: gapPulse 1.6s ease-in-out 2.4s 3; }
+@keyframes gapPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(240,171,0,0); }
+  50% { box-shadow: 0 0 28px rgba(240,171,0,0.45); }
+}
+.timeline-axis {
+  display: flex; justify-content: space-between;
+  margin-top: 46px; font-size: 13px; color: rgba(255,255,255,0.45);
+  border-top: 1px solid rgba(255,255,255,0.12); padding-top: 6px;
+}
+.timeline-axis span { position: relative; padding-top: 6px; }
+.timeline-axis span::before { content: ''; position: absolute; top: -7px; left: 50%; width: 1px; height: 6px; background: rgba(255,255,255,0.3); }
+.stat-tile .stat-number { font-variant-numeric: tabular-nums; }
+.stat-tile { position: relative; overflow: hidden; }
+.stat-tile::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
+  background: var(--tile-accent, var(--red));
+  opacity: 0.8;
+}
+.stat-tile.tile-gold { --tile-accent: var(--gold); }
+.timeline-marker-token {
+  position: absolute;
+  bottom: -36px; left: 0;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px; color: var(--gold);
+  opacity: 0;
+  transition: opacity 0.5s ease-out, left 2s ease-in-out;
+  white-space: nowrap;
+}
+.timeline-marker-token.visible { opacity: 1; }
+
+.timeline-labels {
+  display: flex; justify-content: space-between;
+  margin-top: 8px;
+  font-size: 13px; color: rgba(255,255,255,0.4);
+}
+
+.stats-row {
+  display: flex; gap: 24px; justify-content: center;
+  margin-top: 16px;
+}
+.stats-row .stat-number.red { color: var(--red); }
+.stats-row .stat-number.gold { color: var(--gold); }
+
+.play-btn {
+  height: 48px; padding: 0 24px;
+  background: rgba(240,171,0,0.15);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  color: var(--gold); font-size: 16px; font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 16px;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: background var(--transition);
+}
+.play-btn:hover { background: rgba(240,171,0,0.25); }
+
+/* ===================== SCENE 3: THREE CHOICES ===================== */
+.choices-cve {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 32px;
+}
+.cve-card {
+  background: var(--panel);
+  border: 1px solid rgba(238,0,0,0.3);
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.choices-grid {
+  display: flex; gap: 24px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.choice-card {
+  width: 300px;
+  border-color: rgba(238,0,0,0.2);
+  position: relative;
+}
+.choice-card .choice-num {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(238,0,0,0.15);
+  color: var(--red);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 16px;
+  margin-bottom: 12px;
+}
+.choice-card .choice-title {
+  font-size: 18px; font-weight: 700;
+  margin-bottom: 8px;
+}
+.choice-card .choice-hint {
+  font-size: 14px; color: var(--text-muted);
+}
+.choice-card.explored { border-color: rgba(238,0,0,0.6); background: rgba(238,0,0,0.06); }
+.choice-card.explored .choice-num { background: var(--red); color: #fff; }
+.choice-card .choice-icon {
+  position: absolute; top: 20px; right: 20px;
+  width: 44px; height: 44px; border-radius: 10px;
+  background: rgba(238,0,0,0.1); color: #ff7b7b;
+  display: flex; align-items: center; justify-content: center;
+}
+.choice-card .choice-verdict {
+  margin-top: 12px; font-size: 13px; font-weight: 700; color: var(--red);
+  opacity: 0; transform: translateY(6px);
+  transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+}
+.choice-card.explored .choice-verdict { opacity: 1; transform: translateY(0); }
+.choice-card.explored::after {
+  content: '✕'; position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  font-size: 96px; font-weight: 800; color: rgba(238,0,0,0.12); pointer-events: none;
+}
+.card4 {
+  animation: card4Glow 2.4s ease-in-out infinite;
+}
+@keyframes card4Glow {
+  0%, 100% { box-shadow: 0 0 0 rgba(62,134,53,0); }
+  50% { box-shadow: 0 0 36px rgba(62,134,53,0.45); }
+}
+.card4 .card4-icon { background: radial-gradient(circle at 30% 30%, #6fd35f, var(--green) 70%); box-shadow: 0 0 18px rgba(62,134,53,0.6); }
+
+.card4-wrap {
+  opacity: 0; transform: translateY(20px);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+  pointer-events: none;
+}
+.card4-wrap.revealed {
+  opacity: 1; transform: translateY(0);
+  pointer-events: auto;
+}
+.card4 {
+  width: 680px;
+  border-color: var(--green);
+  background: rgba(62,134,53,0.08);
+  display: flex; align-items: center; gap: 24px;
+  padding: 20px 28px;
+}
+.card4 .card4-icon {
+  width: 56px; height: 56px; flex-shrink: 0;
+  background: rgba(62,134,53,0.2);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.card4 .card4-title { font-size: 20px; font-weight: 700; color: var(--green); }
+.card4 .card4-desc { font-size: 15px; color: var(--text-muted); margin-top: 4px; }
+
+.scene3-cta {
+  margin-top: 16px;
+}
+.scene3-cta .cta-btn { transition: box-shadow var(--transition); }
+.scene3-cta .cta-btn.glow { box-shadow: 0 0 24px rgba(62,134,53,0.5); }
+
+/* ===================== SCENE 4: HOW LIGHTWELL ===================== */
+.scene4-split {
+  display: flex; gap: 48px; align-items: flex-start;
+  width: 1200px;
+}
+.stepper-circle {
+  width: 420px; height: 420px;
+  position: relative; flex-shrink: 0;
+}
+.phase-node {
+  position: absolute;
+  width: 120px; height: 56px;
+  background: var(--panel);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), transform var(--transition);
+  padding: 4px 8px;
+}
+.phase-node:hover {
+  border-color: var(--green);
+  background: rgba(62,134,53,0.1);
+  transform: scale(1.05);
+}
+.phase-node.phase-active {
+  border-color: var(--green);
+  background: rgba(62,134,53,0.18);
+  box-shadow: 0 0 20px rgba(62,134,53,0.45);
+}
+.phase-node.phase-done { border-color: rgba(62,134,53,0.6); }
+.phase-node .phase-num {
+  position: absolute; top: -12px; left: -12px;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--panel); border: 2px solid rgba(255,255,255,0.25);
+  font-size: 12px; font-weight: 800; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.phase-node.phase-active .phase-num, .phase-node.phase-done .phase-num { background: var(--green); border-color: var(--green); color: #fff; }
+.stepper-arc { fill: none; stroke: var(--green); stroke-width: 6; stroke-linecap: round;
+  stroke-dasharray: 1068; stroke-dashoffset: 1068; transition: stroke-dashoffset 0.8s ease-out;
+  filter: drop-shadow(0 0 6px rgba(62,134,53,0.6)); }
+.stepper-ring-spin { animation: spinRing 40s linear infinite; transform-origin: 210px 210px; }
+@keyframes spinRing { to { transform: rotate(360deg); } }
+.pkg-card { position: relative; overflow: hidden; }
+.pkg-card::before {
+  content: ''; position: absolute; top: -60px; right: -60px; width: 180px; height: 180px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(62,134,53,0.35), rgba(62,134,53,0) 70%);
+}
+.pkg-card .pkg-seal {
+  position: absolute; top: 20px; right: 20px;
+  width: 64px; height: 64px; border-radius: 50%;
+  border: 2px solid var(--green); color: var(--green);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-align: center; line-height: 1.1;
+  transform: rotate(-12deg);
+  background: rgba(62,134,53,0.1);
+}
+.pkg-badges .badge { animation: fadeInUp 0.4s ease-out both; }
+.pkg-badges .badge:nth-child(2) { animation-delay: 0.1s; }
+.pkg-badges .badge:nth-child(3) { animation-delay: 0.2s; }
+.pkg-badges .badge:nth-child(4) { animation-delay: 0.3s; }
+.pkg-badges .badge:nth-child(5) { animation-delay: 0.4s; }
+.pkg-card.validated { border-color: var(--blue); }
+.pkg-card.validated .pkg-name { color: var(--blue); }
+.pkg-card.validated .pkg-seal { border-color: var(--blue); color: var(--blue); background: rgba(0,102,204,0.1); }
+.pkg-card.validated::before { background: radial-gradient(circle, rgba(0,102,204,0.35), rgba(0,102,204,0) 70%); }
+
+.stepper-center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.stepper-center svg { margin-bottom: 8px; }
+.stepper-center-label { font-size: 13px; color: var(--text-muted); }
+
+.package-display {
+  flex: 1;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.pkg-card {
+  background: var(--panel);
+  border: 2px solid var(--green);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+}
+.pkg-card .pkg-name {
+  font-size: 22px; font-weight: 700; color: var(--green);
+  margin-bottom: 4px;
+}
+.pkg-card .pkg-version {
+  font-size: 16px; color: var(--text-muted);
+  font-family: monospace;
+}
+.pkg-badges {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 16px;
+}
+.repo-toggle {
+  display: flex;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.15);
+  align-self: flex-start;
+}
+.repo-toggle-btn {
+  padding: 12px 24px;
+  background: transparent; border: none;
+  color: var(--text-muted); font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  min-height: 56px;
+}
+.repo-toggle-btn.active {
+  background: var(--green);
+  color: #fff;
+}
+.repo-toggle-btn:not(.active):hover { background: rgba(255,255,255,0.05); }
+
+.pkg-desc {
+  font-size: 16px; color: var(--text-muted);
+  line-height: 1.6;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: var(--radius);
+}
+.scene4-note {
+  font-size: 15px; color: var(--text-muted);
+  text-align: center; margin-top: 12px;
+  font-style: italic;
+}
+.scene4-badge-count {
+  text-align: center; margin-top: 8px;
+}
+
+/* ===================== SCENE 5: PIPELINE ===================== */
+.pipeline-wrap {
+  width: 1300px;
+}
+.pipeline-stations {
+  display: flex; align-items: flex-start;
+  position: relative;
+  margin-bottom: 32px;
+}
+.pipeline-line {
+  position: absolute;
+  top: 34px; left: 40px; right: 40px;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  z-index: 0;
+}
+.pipeline-line-progress {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%; width: 0%;
+  background: var(--green);
+  border-radius: 2px;
+  transition: width 0.8s ease-out;
+}
+.station {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center;
+  position: relative; z-index: 1;
+  cursor: pointer;
+}
+.station-icon {
+  width: 72px; height: 72px;
+  background: var(--panel);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color var(--transition), background var(--transition), transform var(--transition);
+  margin-bottom: 12px;
+}
+.station:hover .station-icon {
+  border-color: var(--green);
+  background: rgba(62,134,53,0.1);
+  transform: scale(1.1);
+}
+.station.station-reached .station-icon {
+  border-color: var(--green);
+  background: rgba(62,134,53,0.15);
+}
+.station-label {
+  font-size: 13px; font-weight: 600;
+  text-align: center;
+  max-width: 150px; min-height: 40px;
+  color: var(--text-muted);
+  transition: color var(--transition);
+}
+.station.station-reached .station-label { color: var(--text); }
+.station .station-icon { color: var(--st-color, var(--text-muted)); }
+.station[data-station="0"] { --st-color: #ff7b7b; }
+.station[data-station="1"] { --st-color: #7fb8ff; }
+.station[data-station="2"] { --st-color: #c9a0ff; }
+.station[data-station="3"] { --st-color: var(--gold); }
+.station[data-station="4"] { --st-color: #6fd35f; }
+.station[data-station="5"] { --st-color: #6fd35f; }
+.station:hover .station-icon { border-color: var(--st-color); background: rgba(255,255,255,0.05); }
+.station.station-reached .station-icon { border-color: var(--st-color); background: rgba(255,255,255,0.06); box-shadow: 0 0 18px color-mix(in srgb, var(--st-color) 45%, transparent); }
+.station .station-check {
+  position: absolute; top: -4px; right: calc(50% - 44px);
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--green); color: #fff; font-size: 13px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  transform: scale(0); transition: transform 0.35s cubic-bezier(.2,1.6,.4,1);
+  z-index: 2;
+}
+.station.station-reached .station-check { transform: scale(1); }
+.station .station-event {
+  margin-top: 8px; min-height: 26px;
+  font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 12px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  color: var(--st-color); white-space: nowrap;
+  opacity: 0; transform: translateY(6px); transition: opacity 0.4s ease-out 0.2s, transform 0.4s ease-out 0.2s;
+}
+.station.station-reached .station-event { opacity: 1; transform: translateY(0); }
+.pipeline-log {
+  margin: 0 auto 20px; width: 900px; height: 56px;
+  display: flex; align-items: center; gap: 10px; justify-content: center;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; color: var(--text-muted);
+}
+.pipeline-log .log-line { opacity: 0; transition: opacity 0.4s; }
+.pipeline-log .log-line.show { opacity: 1; }
+.pipeline-log .ok { color: #6fd35f; }
+
+.pipeline-token {
+  position: absolute;
+  top: 36px; left: 0;
+  transform: translate(-50%, -50%);
+  width: 48px; height: 48px;
+  background: var(--green);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 5;
+  opacity: 0;
+  transition: left 0.8s ease-in-out, opacity 0.3s ease-out;
+  box-shadow: 0 0 20px rgba(62,134,53,0.5);
+}
+.pipeline-token.visible { opacity: 1; }
+.pipeline-token svg { width: 24px; height: 24px; }
+
+.pipeline-actions {
+  display: flex; justify-content: center; gap: 16px;
+}
+
+/* ===================== SCENE 6: BENEFITS ===================== */
+.toggle-switch-wrap {
+  display: flex; align-items: center; gap: 24px;
+  margin-bottom: 40px;
+}
+.toggle-label { font-size: 20px; font-weight: 700; }
+.toggle-label.active-label { color: var(--text); }
+.toggle-label.inactive-label { color: rgba(255,255,255,0.3); }
+.toggle-label.label-without.active-label { color: var(--red); }
+.toggle-label.label-with.active-label { color: var(--green); }
+
+.toggle-track {
+  width: 80px; height: 44px;
+  background: var(--red);
+  border-radius: 22px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.4s ease-out;
+  flex-shrink: 0;
+}
+.toggle-track.toggled { background: var(--green); }
+.toggle-thumb {
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 36px; height: 36px;
+  background: #fff;
+  border-radius: 50%;
+  transition: left 0.4s ease-out;
+}
+.toggle-track.toggled .toggle-thumb { left: 40px; }
+
+.benefits-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 280px);
+  gap: 24px;
+}
+.flip-card {
+  perspective: 1200px;
+  height: 220px;
+  cursor: pointer;
+}
+.flip-inner {
+  position: relative;
+  width: 100%; height: 100%;
+  transition: transform 0.6s ease-out;
+  transform-style: preserve-3d;
+}
+.flip-inner.flipped { transform: rotateY(180deg); }
+
+.flip-front, .flip-back {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  backface-visibility: hidden;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.flip-front {
+  background: linear-gradient(180deg, rgba(238,0,0,0.12) 0%, var(--panel) 45%);
+  border: 2px solid rgba(238,0,0,0.35);
+}
+.flip-front .flip-icon, .flip-back .flip-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.flip-front .flip-icon { background: rgba(238,0,0,0.15); }
+.flip-back .flip-icon { background: rgba(62,134,53,0.2); }
+.flip-back { background: linear-gradient(180deg, rgba(62,134,53,0.22) 0%, rgba(62,134,53,0.06) 45%); }
+.benefit-summary {
+  margin-top: 28px; font-size: 18px; font-weight: 600; text-align: center;
+  padding: 12px 28px; border-radius: 28px;
+  border: 1px solid rgba(238,0,0,0.4); color: #ff8a8a; background: rgba(238,0,0,0.08);
+  transition: all 0.5s ease-out;
+}
+.benefit-summary.good { border-color: rgba(62,134,53,0.5); color: #6fd35f; background: rgba(62,134,53,0.1); }
+.flip-front .flip-icon { color: var(--red); margin-bottom: 12px; }
+.flip-front .flip-title {
+  font-size: 16px; font-weight: 700; margin-bottom: 8px;
+}
+.flip-front .flip-text { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+.flip-back {
+  background: rgba(62,134,53,0.08);
+  border: 2px solid var(--green);
+  transform: rotateY(180deg);
+}
+.flip-back .flip-icon { color: var(--green); margin-bottom: 12px; }
+.flip-back .flip-title {
+  font-size: 16px; font-weight: 700; color: var(--green); margin-bottom: 8px;
+}
+.flip-back .flip-text { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+/* ===================== SCENE 7: OFFERS ===================== */
+.offers-row {
+  display: flex; gap: 32px;
+  margin-bottom: 40px;
+}
+.offer-card {
+  width: 440px;
+  padding: 32px;
+}
+.offer-card .offer-title {
+  font-size: 24px; font-weight: 700; margin-bottom: 12px;
+}
+.offer-card .offer-badge { margin-bottom: 16px; }
+.offer-card .offer-desc { font-size: 16px; color: var(--text-muted); line-height: 1.6; }
+
+.offer-network { border-color: var(--green); background: linear-gradient(160deg, rgba(62,134,53,0.18), var(--panel) 60%); }
+.offer-network .offer-title { color: #6fd35f; }
+.offer-premier { border-color: var(--gold); background: linear-gradient(160deg, rgba(240,171,0,0.16), var(--panel) 60%); }
+.offer-premier .offer-title { color: var(--gold); }
+.offer-card .offer-list { list-style: none; margin-top: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text-muted); }
+.offer-card .offer-list li::before { content: '✓'; font-weight: 800; margin-right: 8px; }
+.offer-network .offer-list li::before { color: #6fd35f; }
+.offer-premier .offer-list li::before { color: var(--gold); }
+.qr-real { width: 120px; height: 120px; border-radius: var(--radius); overflow: hidden; flex-shrink: 0; background: #fff; padding: 6px; }
+.qr-real svg { width: 100%; height: 100%; display: block; }
+
+.cta-panel {
+  display: flex; align-items: center; gap: 32px;
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-lg);
+  padding: 28px 36px;
+  margin-bottom: 24px;
+}
+.qr-placeholder {
+  width: 120px; height: 120px;
+  border: 2px dashed rgba(255,255,255,0.3);
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700;
+  color: rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.cta-text {
+  flex: 1;
+}
+.cta-text .cta-headline {
+  font-size: 24px; font-weight: 700; margin-bottom: 8px;
+}
+.cta-text .cta-url {
+  font-size: 16px; color: var(--blue);
+}
+
+.restart-btn {
+  height: 56px; padding: 0 32px;
+  background: transparent;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius);
+  color: var(--text); font-size: 16px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.restart-btn:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.4); }
+
+/* ===================== ANIMATIONS ===================== */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.anim-in { animation: fadeInUp 0.4s ease-out both; }
+
+@keyframes tokenPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(62,134,53,0.5); }
+  50% { box-shadow: 0 0 40px rgba(62,134,53,0.8); }
+}
+
+/* ===================== KIOSK ===================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  .flow-pkg { animation: none !important; opacity: 0.2; }
+  .pipeline-token { transition: none !important; }
+}
+
+/* ===================== AUTOPLAY CURSOR ===================== */
+#autoCursor {
+  position: fixed;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: rgba(240,171,0,0.45);
+  border: 2px solid rgba(240,171,0,0.7);
+  z-index: 500;
+  pointer-events: none;
+  left: 960px; top: 540px;
+  transform: translate(-50%,-50%);
+  opacity: 0;
+  transition: left 1.2s cubic-bezier(.4,0,.2,1), top 1.2s cubic-bezier(.4,0,.2,1), opacity 0.4s ease-out;
+  box-shadow: 0 0 18px rgba(240,171,0,0.35);
+}
+#autoCursor.visible { opacity: 1; }
+#autoCursor.clicking {
+  animation: cursorClick 0.3s ease-out;
+}
+@keyframes cursorClick {
+  0%   { transform: translate(-50%,-50%) scale(1); box-shadow: 0 0 18px rgba(240,171,0,0.35); }
+  40%  { transform: translate(-50%,-50%) scale(0.6); box-shadow: 0 0 30px rgba(240,171,0,0.7); }
+  100% { transform: translate(-50%,-50%) scale(1); box-shadow: 0 0 18px rgba(240,171,0,0.35); }
+}
+
+#autoplayBtn {
+  height: 40px; padding: 0 16px;
+  background: var(--panel); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  color: var(--text); font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+#autoplayBtn:hover { background: var(--panel-hover); border-color: rgba(255,255,255,0.3); }
+#autoplayBtn .ap-icon { font-size: 11px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="stage">
+<div id="glow" class="glow-blue"></div>
+<div id="grid"></div>
+<div id="storyBar"></div>
+
+<!-- TOP BAR -->
+<header id="topBar" class="hidden-bar">
+  <button id="homeBtn" aria-label="Home">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 001 1h3v-6h6v6h3a1 1 0 001-1V10"/></svg>
+  </button>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button id="autoplayBtn"><span class="ap-icon">▶</span> <span data-i18n="ap_auto">Automaticky přehrát</span></button>
+    <div id="langSwitch" role="group" aria-label="Language"><button data-lang="cs" class="active">CZ</button><button data-lang="sk">SK</button><button data-lang="pl">PL</button><button data-lang="ro">RO</button><button data-lang="en">EN</button></div>
+  </div>
+</header>
+
+<!-- AUTOPLAY CURSOR -->
+<div id="autoCursor"></div>
+
+<!-- COMMONS-LANG3 MARKER -->
+<div id="marker">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="14" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+  <span id="markerText">commons-lang3 3.14.0</span>
+</div>
+
+<!-- SCENES -->
+<main id="scenes">
+
+  <!-- SCENE 0: ATTRACT -->
+  <section id="scene0" class="scene active" data-scene="0">
+    <div class="packages-flow" id="packagesFlow"></div>
+    <div class="attract-content">
+      <div class="attract-hero">
+        <div class="ring"></div><div class="ring"></div><div class="ring"></div>
+        <div class="hero-core">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
+      </div>
+      <div class="attract-brand">RED HAT LIGHTWELL</div>
+      <h1 data-i18n="s0_title">Z čeho je postavená vaše aplikace?</h1>
+      <p class="attract-sub" data-i18n="s0_sub">Interaktivní demo · Red Hat Lightwell</p>
+      <p class="attract-cta" data-i18n="s0_cta">Dotkněte se obrazovky</p>
+    </div>
+  </section>
+
+  <!-- SCENE 1: ANATOMY -->
+  <section id="scene1" class="scene" data-scene="1">
+    <h2 class="scene-title" data-i18n="s1_title">Vaše aplikace = ~10 % vašeho kódu + až 90 % open source</h2>
+    <div class="anatomy-wrap">
+    <div class="donut-wrap">
+      <svg class="donut" viewBox="0 0 260 260">
+        <circle class="ring-bg" cx="130" cy="130" r="110"/>
+        <circle class="ring-oss" cx="130" cy="130" r="110"/>
+        <circle class="ring-own" cx="130" cy="130" r="110" transform="rotate(324 130 130)"/>
+      </svg>
+      <div class="donut-label">
+        <div class="big">90 %</div>
+        <div class="small" data-i18n="s1_donut">open source</div>
+      </div>
+      <div class="donut-legend"><span class="lg-oss" data-i18n="s1_lg_oss">Open-source knihovny</span><span class="lg-own" data-i18n="s1_lg_own">Váš kód</span></div>
+    </div>
+    <div class="anatomy-container">
+      <div style="padding:12px 24px;font-size:14px;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/></svg>
+        <span style="font-weight:600;color:var(--text)">payment-service</span>
+        <span style="font-size:12px;opacity:0.5">(Spring Boot, Java 21)</span>
+      </div>
+      <div class="anatomy-layer layer-business" data-detail="business">
+        <div class="layer-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/></svg></div>
+        <span class="layer-label" data-i18n="s1_business">Váš byznys kód (~10 %)</span>
+      </div>
+      <div class="libs-grid" id="libsGrid"></div>
+      <div class="anatomy-layer layer-runtime" data-detail="runtime">
+        <div class="layer-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M2 9h20"/></svg></div>
+        <span class="layer-label" data-i18n="s1_runtime">Runtime base — Red Hat Hardened Images (podepsaný digest)</span>
+      </div>
+    </div>
+    </div>
+    <p class="scene-stat" data-i18n="s1_stat">9,8 bilionu stažení open-source balíčků za rok 2025</p>
+  </section>
+
+  <!-- SCENE 2: VULNERABILITY GAP -->
+  <section id="scene2" class="scene" data-scene="2">
+    <h2 class="scene-title" data-i18n="s2_title">AI změnila pravidla: exploit za hodiny, patch za týdny</h2>
+    <button class="play-btn" id="playTimeline">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><polygon points="5,3 17,10 5,17"/></svg>
+      <span data-i18n="s2_play">Přehrát časovou osu</span>
+    </button>
+    <div class="timeline-area">
+      <div class="timeline-header">
+        <span data-i18n="s2_day0" style="white-space:nowrap">Den 0: CVE zveřejněna</span>
+        <svg width="1000" height="2"><line x1="0" y1="1" x2="1000" y2="1" stroke="rgba(255,255,255,0.15)" stroke-dasharray="4 4"/></svg>
+      </div>
+      <div class="timeline-tracks" id="timelineTracks">
+        <div class="timeline-track track-attacker" id="trackAttacker">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="var(--red)" style="margin-right:6px;flex-shrink:0"><path d="M8 1l1.5 3.5L13 5l-2.5 2.5L11 11 8 9.5 5 11l.5-3.5L3 5l3.5-.5z"/></svg>
+          <span data-i18n="s2_attacker" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Útočník: AI exploit za hodiny</span>
+          <div class="boom">!</div>
+        </div>
+        <div class="vuln-gap"><span>VULNERABILITY GAP</span></div>
+        <div class="timeline-track track-enterprise" id="trackEnterprise">
+          <div class="seg seg-1" data-i18n="s2_seg1">Analýza</div>
+          <div class="seg seg-2" data-i18n="s2_seg2">Test</div>
+          <div class="seg seg-3" data-i18n="s2_seg3">Schválení</div>
+          <div class="seg seg-4" data-i18n="s2_seg4">Nasazení — týdny</div>
+        </div>
+        <div class="timeline-marker-token" id="timelineToken">
+          <span>commons-lang3 3.14.0 — </span><span data-i18n="s2_marker">CVE-2026-1234 (ilustrativní) zasahuje i payment-service</span>
+        </div>
+      </div>
+      <div class="timeline-axis">
+        <span data-i18n="s2_ax0">Den 0</span><span data-i18n="s2_ax1">hodiny</span><span data-i18n="s2_ax2">dny</span><span data-i18n="s2_ax3">týdny</span><span data-i18n="s2_ax4">měsíce</span>
+      </div>
+    </div>
+    <div class="stats-row">
+      <div class="stat-tile" data-detail="stat_f5">
+        <div class="stat-number red"><span class="count" data-count="3900" data-prefix="~">~3 900</span></div>
+        <div class="stat-label" data-i18n="s2_stat1_label">kritických zranitelností</div>
+      </div>
+      <div class="stat-tile tile-gold" data-detail="stat_f3">
+        <div class="stat-number gold"><span class="count" data-count="581">581</span></div>
+        <div class="stat-label" data-i18n="s2_stat2_label">zranitelností v průměrné codebase</div>
+      </div>
+      <div class="stat-tile" data-detail="stat_f4">
+        <div class="stat-number red"><span class="count" data-count="50" data-prefix="~" data-suffix=" USD">~50 USD</span></div>
+        <div class="stat-label" data-i18n="s2_stat3_label">AI exploit</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCENE 3: THREE BAD CHOICES -->
+  <section id="scene3" class="scene" data-scene="3">
+    <h2 class="scene-title" data-i18n="s3_heading" style="font-size:36px">commons-lang3 3.14.0</h2>
+    <div class="choices-cve">
+      <div class="cve-card">
+        <span class="badge badge-red">⚠ CVE-2026-1234</span>
+        <span style="font-size:14px;color:var(--text-muted)" data-i18n="s3_illustrative">(ilustrativní příklad)</span>
+      </div>
+    </div>
+    <div class="choices-grid" id="choicesGrid">
+      <div class="card choice-card" data-choice="1">
+        <div class="choice-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg></div>
+        <div class="choice-num">1</div>
+        <div class="choice-title" data-i18n="s3_c1_title">Upgrade na 3.18.0</div>
+        <div class="choice-hint" data-i18n="s3_c1_hint">→ Klikněte pro důsledek</div>
+        <div class="choice-verdict" data-i18n="s3_c1_verdict">Týdny až měsíce práce</div>
+      </div>
+      <div class="card choice-card" data-choice="2">
+        <div class="choice-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="4" r="2"/><circle cx="6" cy="20" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 6v12"/><path d="M18 11c0 4-12 2-12 7"/></svg></div>
+        <div class="choice-num">2</div>
+        <div class="choice-title" data-i18n="s3_c2_title">Vlastní fork a patch</div>
+        <div class="choice-hint" data-i18n="s3_c2_hint">→ Klikněte pro důsledek</div>
+        <div class="choice-verdict" data-i18n="s3_c2_verdict">Vlastní údržba navždy</div>
+      </div>
+      <div class="card choice-card" data-choice="3">
+        <div class="choice-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L2.5 17.5A2 2 0 004.2 20.5h15.6a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg></div>
+        <div class="choice-num">3</div>
+        <div class="choice-title" data-i18n="s3_c3_title">Akceptovat riziko</div>
+        <div class="choice-hint" data-i18n="s3_c3_hint">→ Klikněte pro důsledek</div>
+        <div class="choice-verdict" data-i18n="s3_c3_verdict">Okno zůstává otevřené</div>
+      </div>
+    </div>
+    <div class="card4-wrap" id="card4Wrap">
+      <div class="card card4" data-detail="card4">
+        <div class="card4-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <div>
+          <div class="card4-title">Red Hat Lightwell: 3.14.0.rhlw-00001</div>
+          <div class="card4-desc" data-i18n="s3_c4_desc">Stejná verze, stejné API — jen s bezpečnostní opravou.</div>
+        </div>
+      </div>
+    </div>
+    <div class="scene3-cta">
+      <button class="cta-btn" id="ctaFourthWay" data-i18n="s3_cta">Existuje čtvrtá cesta →</button>
+    </div>
+  </section>
+
+  <!-- SCENE 4: HOW LIGHTWELL -->
+  <section id="scene4" class="scene" data-scene="4">
+    <h2 class="scene-title" data-i18n="s4_title">AI agenti + 20 000 inženýrů Red Hatu a IBM</h2>
+    <div class="scene4-split">
+      <div class="stepper-circle" id="stepperCircle">
+        <svg width="420" height="420" viewBox="0 0 420 420" style="position:absolute;top:0;left:0">
+          <circle class="stepper-ring-spin" cx="210" cy="210" r="170" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" stroke-dasharray="8 8"/>
+          <circle class="stepper-arc" id="stepperArc" cx="210" cy="210" r="170" transform="rotate(-90 210 210)"/>
+        </svg>
+        <div class="stepper-center">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <div class="stepper-center-label" data-i18n="s4_lifecycle">Lifecycle</div>
+        </div>
+      </div>
+      <div class="package-display">
+        <div class="pkg-card" id="pkgCard">
+          <div class="pkg-seal" id="pkgSeal">RED HAT<br>SIGNED</div>
+          <div class="pkg-name">commons-lang3</div>
+          <div class="pkg-version" id="pkgVersion">3.14.0.rhlw-00001</div>
+          <div class="pkg-badges" id="pkgBadges">
+            <span class="badge badge-green">✓ Sigstore / cosign</span>
+            <span class="badge badge-green">✓ SLSA Level 3</span>
+            <span class="badge badge-blue">SBOM (CycloneDX)</span>
+            <span class="badge badge-blue">VEX + OSV (RHLW-2026-0042)</span>
+            <span class="badge badge-gold" data-i18n="s4_badge_backport">security-only backport</span>
+          </div>
+        </div>
+        <div class="repo-toggle" id="repoToggle">
+          <button class="repo-toggle-btn" data-repo="validated" data-i18n="s4_validated_btn">Validated</button>
+          <button class="repo-toggle-btn active" data-repo="remediated" data-i18n="s4_remediated_btn">Remediated</button>
+        </div>
+        <div class="pkg-desc" id="repoDesc" data-i18n="s4_remediated_desc">Security-only oprava přesně vaší verze — přípona .rhlw</div>
+      </div>
+    </div>
+    <p class="scene4-note" data-i18n="s4_note">Každý AI patch prochází automatickými testy a lidskou validací</p>
+    <div class="scene4-badge-count"><span class="badge badge-green" data-i18n="s4_badge_count">6 500+ opravených závislostí při spuštění (Java, Python)</span></div>
+  </section>
+
+  <!-- SCENE 5: PIPELINE -->
+  <section id="scene5" class="scene" data-scene="5">
+    <h2 class="scene-title" data-i18n="s5_title">Oprava přijde jako pull request — zbytek už máte</h2>
+    <div class="pipeline-wrap">
+      <div class="pipeline-stations" id="pipelineStations">
+        <div class="pipeline-line"><div class="pipeline-line-progress" id="pipelineProgress"></div></div>
+        <div class="station" data-station="0">
+          <div class="station-check">✓</div>
+          <div class="station-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 3v18"/></svg></div>
+          <div class="station-label">packages.redhat.com</div>
+          <div class="station-event" data-i18n="s5_ev0">·</div>
+        </div>
+        <div class="station" data-station="1">
+          <div class="station-check">✓</div>
+          <div class="station-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg></div>
+          <div class="station-label" data-i18n="s5_st1">Enterprise proxy</div>
+          <div class="station-event" data-i18n="s5_ev1">·</div>
+        </div>
+        <div class="station" data-station="2">
+          <div class="station-check">✓</div>
+          <div class="station-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/></svg></div>
+          <div class="station-label" data-i18n="s5_st2">Git — Renovate PR</div>
+          <div class="station-event" data-i18n="s5_ev2">·</div>
+        </div>
+        <div class="station" data-station="3">
+          <div class="station-check">✓</div>
+          <div class="station-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h16M4 12h16M4 18h16"/><path d="M20 6l-4 6 4 6"/></svg></div>
+          <div class="station-label" data-i18n="s5_st3">Hermetický build</div>
+          <div class="station-event" data-i18n="s5_ev3">·</div>
+        </div>
+        <div class="station" data-station="4">
+          <div class="station-check">✓</div>
+          <div class="station-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <div class="station-label" data-i18n="s5_st4">Podpis a policy</div>
+          <div class="station-event" data-i18n="s5_ev4">·</div>
+        </div>
+        <div class="station" data-station="5">
+          <div class="station-check">✓</div>
+          <div class="station-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div>
+          <div class="station-label" data-i18n="s5_st5">Produkce + evidence</div>
+          <div class="station-event" data-i18n="s5_ev5">·</div>
+        </div>
+        <div class="pipeline-token" id="pipelineToken">
+          <svg viewBox="0 0 24 24" fill="#fff"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4" stroke="#3E8635" stroke-width="2.5" fill="none"/></svg>
+        </div>
+      </div>
+      <div class="pipeline-log" id="pipelineLog"><span class="log-line" id="logLine">$ renovate: commons-lang3 3.14.0 → 3.14.0.rhlw-00001</span></div>
+      <div class="pipeline-actions">
+        <button class="cta-btn" id="sendFixBtn">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><polygon points="3,2 17,10 3,18"/></svg>
+          <span data-i18n="s5_send">Poslat opravu</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCENE 6: BENEFITS -->
+  <section id="scene6" class="scene" data-scene="6">
+    <h2 class="scene-title" style="margin-bottom:16px" data-i18n="s6_heading">Přínosy</h2>
+    <div class="toggle-switch-wrap">
+      <span class="toggle-label label-without active-label" data-i18n="s6_without">BEZ LIGHTWELL</span>
+      <div class="toggle-track" id="benefitToggle">
+        <div class="toggle-thumb"></div>
+      </div>
+      <span class="toggle-label label-with inactive-label" data-i18n="s6_with">S LIGHTWELL</span>
+    </div>
+    <div class="benefits-grid" id="benefitsGrid">
+      <div class="flip-card" data-benefit="0">
+        <div class="flip-inner">
+          <div class="flip-front">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b0_title">Čas do bezpečné verze</div>
+            <div class="flip-text" data-i18n="s6_b0_without">Čekání na upstream + upgrade projekt</div>
+          </div>
+          <div class="flip-back">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b0_title_w">Čas do bezpečné verze</div>
+            <div class="flip-text" data-i18n="s6_b0_with">Oprava pro vaši verzi, hned jak ji Red Hat vydá</div>
+          </div>
+        </div>
+      </div>
+      <div class="flip-card" data-benefit="1">
+        <div class="flip-inner">
+          <div class="flip-front">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b1_title">Riziko změn</div>
+            <div class="flip-text" data-i18n="s6_b1_without">Nová major verze = regrese a recertifikace</div>
+          </div>
+          <div class="flip-back">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b1_title_w">Riziko změn</div>
+            <div class="flip-text" data-i18n="s6_b1_with">Stejné API, jen bezpečnostní oprava</div>
+          </div>
+        </div>
+      </div>
+      <div class="flip-card" data-benefit="2">
+        <div class="flip-inner">
+          <div class="flip-front">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10M7 12h10M7 17h6"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b2_title">Audit a evidence</div>
+            <div class="flip-text" data-i18n="s6_b2_without">Ruční dokládání, co kde běží</div>
+          </div>
+          <div class="flip-back">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b2_title_w">Audit a evidence</div>
+            <div class="flip-text" data-i18n="s6_b2_with">Podpis + SBOM + VEX/OSV automaticky s balíčkem</div>
+          </div>
+        </div>
+      </div>
+      <div class="flip-card" data-benefit="3">
+        <div class="flip-inner">
+          <div class="flip-front">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b3_title">Šum skenerů</div>
+            <div class="flip-text" data-i18n="s6_b3_without">Stovky nálezů, ruční triage</div>
+          </div>
+          <div class="flip-back">
+            <div class="flip-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <div class="flip-title" data-i18n="s6_b3_title_w">Šum skenerů</div>
+            <div class="flip-text" data-i18n="s6_b3_with">VEX řekne, co je reálně opraveno a co se vás netýká</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="benefit-summary" id="benefitSummary" data-i18n="s6_sum_without">Dnes: každá kritická CVE = projekt na týdny</div>
+  </section>
+
+  <!-- SCENE 7: OFFERS -->
+  <section id="scene7" class="scene" data-scene="7">
+    <h2 class="scene-title" data-i18n="s7_title" style="margin-bottom:24px">Jak získat Red Hat Lightwell</h2>
+    <div class="offers-row">
+      <div class="card offer-card offer-network" data-detail="offer_network">
+        <div class="offer-title">Lightwell Network</div>
+        <div class="offer-badge"><span class="badge badge-green" data-i18n="s7_net_badge">Dostupné (GA)</span></div>
+        <div class="offer-desc" data-i18n="s7_net_desc">Roční subscription · repozitáře Validated + Remediated · Java a Python</div>
+        <ul class="offer-list">
+          <li data-i18n="s7_net_l1">6 500+ opravených závislostí při spuštění</li>
+          <li data-i18n="s7_net_l2">Podepsané balíčky, SBOM, VEX + OSV</li>
+          <li data-i18n="s7_net_l3">Přes váš Nexus / Artifactory</li>
+        </ul>
+      </div>
+      <div class="card offer-card offer-premier" data-detail="offer_premier">
+        <div class="offer-title">Lightwell Clearinghouse Premier</div>
+        <div class="offer-badge"><span class="badge badge-gold" data-i18n="s7_prem_badge">Omezená dostupnost</span></div>
+        <div class="offer-desc" data-i18n="s7_prem_desc">Vše z Network + opravy verzí na míru, embargo před zveřejněním, TAM</div>
+        <ul class="offer-list">
+          <li data-i18n="s7_prem_l1">Opravy pro verze, které používáte právě vy</li>
+          <li data-i18n="s7_prem_l2">Řešení zranitelností pod embargem</li>
+          <li data-i18n="s7_prem_l3">Technical Account Manager</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cta-panel">
+      <div class="qr-real" aria-label="QR: redhat.com/en/lightwell"><svg viewBox="0 0 31 31" width="120" height="120" shape-rendering="crispEdges"><rect width="31" height="31" fill="#fff"/><path d="M1 1h1v1h-1zM2 1h1v1h-1zM3 1h1v1h-1zM4 1h1v1h-1zM5 1h1v1h-1zM6 1h1v1h-1zM7 1h1v1h-1zM10 1h1v1h-1zM11 1h1v1h-1zM12 1h1v1h-1zM16 1h1v1h-1zM17 1h1v1h-1zM18 1h1v1h-1zM19 1h1v1h-1zM20 1h1v1h-1zM23 1h1v1h-1zM24 1h1v1h-1zM25 1h1v1h-1zM26 1h1v1h-1zM27 1h1v1h-1zM28 1h1v1h-1zM29 1h1v1h-1zM1 2h1v1h-1zM7 2h1v1h-1zM18 2h1v1h-1zM21 2h1v1h-1zM23 2h1v1h-1zM29 2h1v1h-1zM1 3h1v1h-1zM3 3h1v1h-1zM4 3h1v1h-1zM5 3h1v1h-1zM7 3h1v1h-1zM9 3h1v1h-1zM11 3h1v1h-1zM15 3h1v1h-1zM17 3h1v1h-1zM21 3h1v1h-1zM23 3h1v1h-1zM25 3h1v1h-1zM26 3h1v1h-1zM27 3h1v1h-1zM29 3h1v1h-1zM1 4h1v1h-1zM3 4h1v1h-1zM4 4h1v1h-1zM5 4h1v1h-1zM7 4h1v1h-1zM9 4h1v1h-1zM10 4h1v1h-1zM13 4h1v1h-1zM18 4h1v1h-1zM20 4h1v1h-1zM23 4h1v1h-1zM25 4h1v1h-1zM26 4h1v1h-1zM27 4h1v1h-1zM29 4h1v1h-1zM1 5h1v1h-1zM3 5h1v1h-1zM4 5h1v1h-1zM5 5h1v1h-1zM7 5h1v1h-1zM9 5h1v1h-1zM13 5h1v1h-1zM14 5h1v1h-1zM15 5h1v1h-1zM16 5h1v1h-1zM19 5h1v1h-1zM20 5h1v1h-1zM21 5h1v1h-1zM23 5h1v1h-1zM25 5h1v1h-1zM26 5h1v1h-1zM27 5h1v1h-1zM29 5h1v1h-1zM1 6h1v1h-1zM7 6h1v1h-1zM9 6h1v1h-1zM10 6h1v1h-1zM11 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM15 6h1v1h-1zM16 6h1v1h-1zM21 6h1v1h-1zM23 6h1v1h-1zM29 6h1v1h-1zM1 7h1v1h-1zM2 7h1v1h-1zM3 7h1v1h-1zM4 7h1v1h-1zM5 7h1v1h-1zM6 7h1v1h-1zM7 7h1v1h-1zM9 7h1v1h-1zM11 7h1v1h-1zM13 7h1v1h-1zM15 7h1v1h-1zM17 7h1v1h-1zM19 7h1v1h-1zM21 7h1v1h-1zM23 7h1v1h-1zM24 7h1v1h-1zM25 7h1v1h-1zM26 7h1v1h-1zM27 7h1v1h-1zM28 7h1v1h-1zM29 7h1v1h-1zM9 8h1v1h-1zM10 8h1v1h-1zM13 8h1v1h-1zM14 8h1v1h-1zM16 8h1v1h-1zM17 8h1v1h-1zM20 8h1v1h-1zM21 8h1v1h-1zM1 9h1v1h-1zM3 9h1v1h-1zM4 9h1v1h-1zM5 9h1v1h-1zM6 9h1v1h-1zM7 9h1v1h-1zM10 9h1v1h-1zM11 9h1v1h-1zM13 9h1v1h-1zM15 9h1v1h-1zM18 9h1v1h-1zM20 9h1v1h-1zM23 9h1v1h-1zM24 9h1v1h-1zM25 9h1v1h-1zM26 9h1v1h-1zM27 9h1v1h-1zM2 10h1v1h-1zM4 10h1v1h-1zM5 10h1v1h-1zM13 10h1v1h-1zM17 10h1v1h-1zM18 10h1v1h-1zM19 10h1v1h-1zM20 10h1v1h-1zM21 10h1v1h-1zM23 10h1v1h-1zM24 10h1v1h-1zM25 10h1v1h-1zM29 10h1v1h-1zM1 11h1v1h-1zM2 11h1v1h-1zM3 11h1v1h-1zM4 11h1v1h-1zM7 11h1v1h-1zM10 11h1v1h-1zM12 11h1v1h-1zM16 11h1v1h-1zM18 11h1v1h-1zM21 11h1v1h-1zM22 11h1v1h-1zM1 12h1v1h-1zM4 12h1v1h-1zM6 12h1v1h-1zM8 12h1v1h-1zM9 12h1v1h-1zM12 12h1v1h-1zM13 12h1v1h-1zM15 12h1v1h-1zM16 12h1v1h-1zM17 12h1v1h-1zM19 12h1v1h-1zM20 12h1v1h-1zM22 12h1v1h-1zM23 12h1v1h-1zM24 12h1v1h-1zM26 12h1v1h-1zM28 12h1v1h-1zM1 13h1v1h-1zM3 13h1v1h-1zM5 13h1v1h-1zM7 13h1v1h-1zM8 13h1v1h-1zM10 13h1v1h-1zM11 13h1v1h-1zM12 13h1v1h-1zM13 13h1v1h-1zM18 13h1v1h-1zM19 13h1v1h-1zM26 13h1v1h-1zM27 13h1v1h-1zM5 14h1v1h-1zM9 14h1v1h-1zM10 14h1v1h-1zM14 14h1v1h-1zM15 14h1v1h-1zM17 14h1v1h-1zM18 14h1v1h-1zM19 14h1v1h-1zM20 14h1v1h-1zM21 14h1v1h-1zM22 14h1v1h-1zM23 14h1v1h-1zM25 14h1v1h-1zM29 14h1v1h-1zM1 15h1v1h-1zM2 15h1v1h-1zM5 15h1v1h-1zM7 15h1v1h-1zM8 15h1v1h-1zM10 15h1v1h-1zM11 15h1v1h-1zM12 15h1v1h-1zM13 15h1v1h-1zM14 15h1v1h-1zM15 15h1v1h-1zM16 15h1v1h-1zM17 15h1v1h-1zM18 15h1v1h-1zM24 15h1v1h-1zM26 15h1v1h-1zM27 15h1v1h-1zM1 16h1v1h-1zM3 16h1v1h-1zM5 16h1v1h-1zM10 16h1v1h-1zM11 16h1v1h-1zM12 16h1v1h-1zM14 16h1v1h-1zM16 16h1v1h-1zM17 16h1v1h-1zM20 16h1v1h-1zM21 16h1v1h-1zM24 16h1v1h-1zM25 16h1v1h-1zM28 16h1v1h-1zM2 17h1v1h-1zM4 17h1v1h-1zM7 17h1v1h-1zM8 17h1v1h-1zM9 17h1v1h-1zM11 17h1v1h-1zM12 17h1v1h-1zM15 17h1v1h-1zM16 17h1v1h-1zM18 17h1v1h-1zM20 17h1v1h-1zM24 17h1v1h-1zM26 17h1v1h-1zM27 17h1v1h-1zM1 18h1v1h-1zM3 18h1v1h-1zM4 18h1v1h-1zM5 18h1v1h-1zM9 18h1v1h-1zM10 18h1v1h-1zM17 18h1v1h-1zM18 18h1v1h-1zM19 18h1v1h-1zM20 18h1v1h-1zM22 18h1v1h-1zM23 18h1v1h-1zM24 18h1v1h-1zM25 18h1v1h-1zM27 18h1v1h-1zM29 18h1v1h-1zM1 19h1v1h-1zM3 19h1v1h-1zM6 19h1v1h-1zM7 19h1v1h-1zM8 19h1v1h-1zM9 19h1v1h-1zM10 19h1v1h-1zM11 19h1v1h-1zM13 19h1v1h-1zM16 19h1v1h-1zM17 19h1v1h-1zM24 19h1v1h-1zM27 19h1v1h-1zM1 20h1v1h-1zM5 20h1v1h-1zM6 20h1v1h-1zM8 20h1v1h-1zM9 20h1v1h-1zM10 20h1v1h-1zM13 20h1v1h-1zM15 20h1v1h-1zM17 20h1v1h-1zM19 20h1v1h-1zM21 20h1v1h-1zM22 20h1v1h-1zM24 20h1v1h-1zM25 20h1v1h-1zM28 20h1v1h-1zM1 21h1v1h-1zM6 21h1v1h-1zM7 21h1v1h-1zM11 21h1v1h-1zM12 21h1v1h-1zM16 21h1v1h-1zM17 21h1v1h-1zM18 21h1v1h-1zM21 21h1v1h-1zM22 21h1v1h-1zM23 21h1v1h-1zM24 21h1v1h-1zM25 21h1v1h-1zM27 21h1v1h-1zM28 21h1v1h-1zM29 21h1v1h-1zM9 22h1v1h-1zM10 22h1v1h-1zM11 22h1v1h-1zM14 22h1v1h-1zM15 22h1v1h-1zM17 22h1v1h-1zM18 22h1v1h-1zM19 22h1v1h-1zM20 22h1v1h-1zM21 22h1v1h-1zM25 22h1v1h-1zM26 22h1v1h-1zM27 22h1v1h-1zM28 22h1v1h-1zM29 22h1v1h-1zM1 23h1v1h-1zM2 23h1v1h-1zM3 23h1v1h-1zM4 23h1v1h-1zM5 23h1v1h-1zM6 23h1v1h-1zM7 23h1v1h-1zM12 23h1v1h-1zM13 23h1v1h-1zM14 23h1v1h-1zM15 23h1v1h-1zM16 23h1v1h-1zM19 23h1v1h-1zM20 23h1v1h-1zM21 23h1v1h-1zM23 23h1v1h-1zM25 23h1v1h-1zM26 23h1v1h-1zM27 23h1v1h-1zM1 24h1v1h-1zM7 24h1v1h-1zM9 24h1v1h-1zM12 24h1v1h-1zM14 24h1v1h-1zM16 24h1v1h-1zM17 24h1v1h-1zM20 24h1v1h-1zM21 24h1v1h-1zM25 24h1v1h-1zM29 24h1v1h-1zM1 25h1v1h-1zM3 25h1v1h-1zM4 25h1v1h-1zM5 25h1v1h-1zM7 25h1v1h-1zM9 25h1v1h-1zM10 25h1v1h-1zM12 25h1v1h-1zM13 25h1v1h-1zM15 25h1v1h-1zM16 25h1v1h-1zM17 25h1v1h-1zM18 25h1v1h-1zM21 25h1v1h-1zM22 25h1v1h-1zM23 25h1v1h-1zM24 25h1v1h-1zM25 25h1v1h-1zM27 25h1v1h-1zM28 25h1v1h-1zM1 26h1v1h-1zM3 26h1v1h-1zM4 26h1v1h-1zM5 26h1v1h-1zM7 26h1v1h-1zM9 26h1v1h-1zM10 26h1v1h-1zM11 26h1v1h-1zM12 26h1v1h-1zM13 26h1v1h-1zM17 26h1v1h-1zM19 26h1v1h-1zM20 26h1v1h-1zM24 26h1v1h-1zM26 26h1v1h-1zM27 26h1v1h-1zM28 26h1v1h-1zM29 26h1v1h-1zM1 27h1v1h-1zM3 27h1v1h-1zM4 27h1v1h-1zM5 27h1v1h-1zM7 27h1v1h-1zM9 27h1v1h-1zM10 27h1v1h-1zM11 27h1v1h-1zM14 27h1v1h-1zM16 27h1v1h-1zM18 27h1v1h-1zM22 27h1v1h-1zM23 27h1v1h-1zM24 27h1v1h-1zM25 27h1v1h-1zM26 27h1v1h-1zM27 27h1v1h-1zM28 27h1v1h-1zM1 28h1v1h-1zM7 28h1v1h-1zM13 28h1v1h-1zM15 28h1v1h-1zM16 28h1v1h-1zM21 28h1v1h-1zM22 28h1v1h-1zM23 28h1v1h-1zM24 28h1v1h-1zM26 28h1v1h-1zM28 28h1v1h-1zM1 29h1v1h-1zM2 29h1v1h-1zM3 29h1v1h-1zM4 29h1v1h-1zM5 29h1v1h-1zM6 29h1v1h-1zM7 29h1v1h-1zM9 29h1v1h-1zM11 29h1v1h-1zM12 29h1v1h-1zM13 29h1v1h-1zM18 29h1v1h-1zM20 29h1v1h-1zM22 29h1v1h-1zM24 29h1v1h-1zM25 29h1v1h-1zM26 29h1v1h-1zM27 29h1v1h-1z" fill="#151515"/></svg></div>
+      <div class="cta-text">
+        <div class="cta-headline" data-i18n="s7_cta">Chcete to vidět ve vašem Nexusu? Promluvme si.</div>
+        <div class="cta-url">redhat.com/en/lightwell</div>
+      </div>
+    </div>
+    <button class="restart-btn" id="restartBtn" data-i18n="s7_restart">Začít znovu</button>
+  </section>
+
+</main>
+
+<!-- OVERLAY -->
+<div id="overlay">
+  <div id="overlayBackdrop"></div>
+  <div id="overlayPanel">
+    <button id="overlayClose" aria-label="Close">×</button>
+    <div id="overlayTitle"></div>
+    <div id="overlayBody"></div>
+  </div>
+</div>
+
+<!-- NAVIGATION -->
+<nav id="navigation" class="hidden-nav">
+  <button class="nav-btn" id="prevBtn" disabled>
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3L6 9l6 6"/></svg>
+    <span data-i18n="nav_back">Zpět</span>
+  </button>
+  <div id="dots"></div>
+  <button class="nav-btn" id="nextBtn">
+    <span data-i18n="nav_next">Další</span>
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3l6 6-6 6"/></svg>
+  </button>
+</nav>
+
+<!-- FOOTER -->
+<footer id="disclaimer" data-i18n="disclaimer">Ilustrativní demo pro diskuzi na stánku · není oficiální dokumentace Red Hat</footer>
+</div><!-- /stage -->
+
+<script>
+(function(){
+'use strict';
+
+/* ============================== I18N ============================== */
+const T = {
+  cs: {
+    s0_title: 'Z čeho je postavená vaše aplikace?',
+    s0_sub: 'Interaktivní demo · Red Hat Lightwell',
+    s0_cta: 'Dotkněte se obrazovky',
+    s1_title: 'Vaše aplikace = ~10 % vašeho kódu + až 90 % open source',
+    s1_business: 'Váš byznys kód (~10 %)',
+    s1_runtime: 'Runtime base — Red Hat Hardened Images (podepsaný digest)',
+    s1_stat: '9,8 bilionu stažení open-source balíčků za rok 2025',
+    s1_remember: 'Tuto knihovnu si zapamatujte.',
+    s2_title: 'AI změnila pravidla: exploit za hodiny, patch za týdny',
+    s2_play: 'Přehrát časovou osu',
+    s2_day0: 'Den 0: CVE zveřejněna',
+    s2_attacker: 'Útočník: AI exploit za hodiny',
+    s2_enterprise: 'Podnik (analýza → test → schválení → nasazení — týdny)',
+    s2_marker: 'CVE-2026-1234 (ilustrativní) zasahuje i payment-service',
+    s2_stat1_label: 'kritických zranitelností',
+    s2_stat2_label: 'zranitelností v průměrné codebase',
+    s2_stat3_label: 'AI exploit',
+    s3_heading: 'commons-lang3 3.14.0',
+    s3_illustrative: '(ilustrativní příklad)',
+    s3_c1_title: 'Upgrade na 3.18.0',
+    s3_c1_hint: '→ Klikněte pro důsledek',
+    s3_c2_title: 'Vlastní fork a patch',
+    s3_c2_hint: '→ Klikněte pro důsledek',
+    s3_c3_title: 'Akceptovat riziko',
+    s3_c3_hint: '→ Klikněte pro důsledek',
+    s3_c4_desc: 'Stejná verze, stejné API — jen s bezpečnostní opravou.',
+    s3_cta: 'Existuje čtvrtá cesta →',
+    s4_title: 'AI agenti + 20 000 inženýrů Red Hatu a IBM',
+    s4_lifecycle: 'Lifecycle',
+    s4_validated_btn: 'Validated',
+    s4_remediated_btn: 'Remediated',
+    s4_validated_desc: 'Ověřené přestavby upstream verzí — podepsané, se SBOM',
+    s4_remediated_desc: 'Security-only oprava přesně vaší verze — přípona .rhlw',
+    s4_note: 'Každý AI patch prochází automatickými testy a lidskou validací',
+    s4_badge_count: '6 500+ opravených závislostí při spuštění (Java, Python)',
+    s5_title: 'Oprava přijde jako pull request — zbytek už máte',
+    s5_st1: 'Enterprise proxy',
+    s5_st2: 'Git — Renovate PR',
+    s5_st3: 'Hermetický build',
+    s5_st4: 'Podpis a policy',
+    s5_st5: 'Produkce + evidence',
+    s5_send: 'Poslat opravu',
+    s6_heading: 'Přínosy',
+    s6_without: 'BEZ LIGHTWELL',
+    s6_with: 'S LIGHTWELL',
+    s6_b0_title: 'Čas do bezpečné verze',
+    s6_b0_without: 'Čekání na upstream + upgrade projekt',
+    s6_b0_with: 'Oprava pro vaši verzi, hned jak ji Red Hat vydá',
+    s6_b0_title_w: 'Čas do bezpečné verze',
+    s6_b1_title: 'Riziko změn',
+    s6_b1_without: 'Nová major verze = regrese a recertifikace',
+    s6_b1_with: 'Stejné API, jen bezpečnostní oprava',
+    s6_b1_title_w: 'Riziko změn',
+    s6_b2_title: 'Audit a evidence',
+    s6_b2_without: 'Ruční dokládání, co kde běží',
+    s6_b2_with: 'Podpis + SBOM + VEX/OSV automaticky s balíčkem',
+    s6_b2_title_w: 'Audit a evidence',
+    s6_b3_title: 'Šum skenerů',
+    s6_b3_without: 'Stovky nálezů, ruční triage',
+    s6_b3_with: 'VEX řekne, co je reálně opraveno a co se vás netýká',
+    s6_b3_title_w: 'Šum skenerů',
+    s7_title: 'Jak získat Red Hat Lightwell',
+    s7_net_badge: 'Dostupné (GA)',
+    s7_net_desc: 'Roční subscription · repozitáře Validated + Remediated · Java a Python',
+    s7_prem_badge: 'Omezená dostupnost',
+    s7_prem_desc: 'Vše z Network + opravy verzí na míru, embargo před zveřejněním, TAM',
+    s7_cta: 'Chcete to vidět ve vašem Nexusu? Promluvme si.',
+    s7_restart: 'Začít znovu',
+    nav_back: 'Zpět',
+    nav_next: 'Další',
+    disclaimer: 'Ilustrativní demo pro diskuzi na stánku · není oficiální dokumentace Red Hat',
+    detail_business_title: 'Váš byznys kód',
+    detail_business_body: 'Vaše business logika, API endpointy a konfigurace. Typicky tvoří pouze ~10 % celkového kódu aplikace.',
+    detail_runtime_title: 'Runtime base',
+    detail_runtime_body: 'Kontejnerový base image, na kterém aplikace běží. Red Hat Hardened Images jsou ověřené a podepsané (digest).',
+    detail_oss_title: 'Open-source závislosti',
+    detail_oss_body: 'Závislosti třetích stran stažené z veřejných repozitářů. Tvoří až 90 % kódu vaší aplikace.',
+    detail_stat_f5_title: '~3 900 kritických zranitelností',
+    detail_stat_f5_body: 'AI model (Anthropic Mythos Preview) identifikoval téměř 3 900 high/critical zranitelností v open-source softwaru.',
+    detail_stat_f5_source: 'Zdroj: Red Hat press 28. 5. 2026',
+    detail_stat_f3_title: '581 zranitelností',
+    detail_stat_f3_body: 'Průměrná podniková codebase obsahuje 581 zranitelností.',
+    detail_stat_f3_source: 'Zdroj: IBM newsroom',
+    detail_stat_f4_title: 'AI exploit za ~50 USD',
+    detail_stat_f4_body: 'AI vygeneruje funkční exploit za cenu okolo 50 USD.',
+    detail_stat_f4_source: 'Zdroj: IBM newsroom',
+    detail_c1_title: 'Upgrade na 3.18.0',
+    detail_c1_body: 'Nové API, regrese, recertifikace. Týdny až měsíce práce.',
+    detail_c2_title: 'Vlastní fork a patch',
+    detail_c2_body: 'Od teď udržujete vlastní větev knihovny. Navždy.',
+    detail_c3_title: 'Akceptovat riziko',
+    detail_c3_body: 'Okno pro útočníka zůstává otevřené. Exploit už existuje.',
+    detail_card4_title: 'Red Hat Lightwell',
+    detail_card4_body: 'Verze 3.14.0.rhlw-00001 — stejná verze, stejné API, jen s bezpečnostní opravou. Podepsaný balíček se SBOM a VEX/OSV metadaty. OSV advisory RHLW-2026-0042 (ilustrativní) s událostí fixed ukazuje na opravenou verzi.',
+    detail_offer_network_title: 'Lightwell Network',
+    detail_offer_network_body: 'Dostupné (GA) od 8. 7. 2026. Roční subscription. Repozitáře Validated + Remediated pro Java a Python. Konzumace přes packages.redhat.com skrze existující Nexus / Artifactory.',
+    detail_offer_premier_title: 'Lightwell Clearinghouse Premier',
+    detail_offer_premier_body: 'Omezená dostupnost. Vše z Network + opravy verzí na míru, embargo před zveřejněním, TAM (Technical Account Manager). Dostupnost v CEE ověřuje account tým.',
+    phase_0: 'Identifikace a onboarding open-source komponent do katalogu.',
+    phase_1: 'Distribuce podepsaných balíčků přes packages.redhat.com.',
+    phase_2: 'Automatické testy a lidská validace každé opravy.',
+    phase_3: 'Nasazení přes existující pipeline zákazníka.',
+    phase_4: 'Příspěvek oprav zpět do upstream projektů.',
+    phase_5: 'Koordinované zveřejnění zranitelností.',
+    station_0_what: 'Podepsané Lightwell repozitáře s ověřenými a opravenými balíčky.',
+    station_0_role: 'Lightwell hostuje opravené verze závislostí.',
+    station_1_what: 'Nexus / Artifactory stahuje balíčky pouze z packages.redhat.com, žádný fallback na Maven Central.',
+    station_1_role: 'Lightwell je kompatibilní se standardními proxy servery.',
+    station_2_what: 'Renovate bot otevře pull request s novým pinem; tým ho zreviduje a mergne.',
+    station_2_role: 'Oprava přijde automaticky jako PR — žádné ruční zásahy.',
+    station_3_what: 'Build používá pouze závislosti z proxy; vzniká SBOM aplikace.',
+    station_3_role: 'Lightwell balíček obsahuje SBOM a metadata pro build.',
+    station_4_what: 'Image je podepsaný (RHTAS), politika pustí jen podepsaný digest.',
+    station_4_role: 'Lightwell artefakty jsou podepsány (Sigstore/cosign), SLSA Level 3.',
+    station_5_what: 'GitOps promotion; RHTPA/ACS potvrdí: CVE opravena přes Lightwell pin.',
+    station_5_role: 'VEX + OSV metadata automaticky dokumentují stav opravy.',
+    station_what_label: 'Co se tu děje',
+    station_role_label: 'Role Lightwellu',
+    s1_donut: 'open source',
+    s1_lg_oss: 'Open-source knihovny',
+    s1_lg_own: 'Váš kód',
+    s2_seg1: 'Analýza',
+    s2_seg2: 'Test',
+    s2_seg3: 'Schválení',
+    s2_seg4: 'Nasazení — týdny',
+    s2_ax0: 'Den 0', s2_ax1: 'hodiny', s2_ax2: 'dny', s2_ax3: 'týdny', s2_ax4: 'měsíce',
+    s3_c1_verdict: 'Týdny až měsíce práce',
+    s3_c2_verdict: 'Vlastní údržba navždy',
+    s3_c3_verdict: 'Okno zůstává otevřené',
+    s4_badge_backport: 'security-only backport',
+    s5_ev0: 'artefakt podepsán',
+    s5_ev1: 'cache OK · bez Central',
+    s5_ev2: 'PR #142 merged',
+    s5_ev3: 'build OK · SBOM 187 komponent',
+    s5_ev4: 'cosign ✓ · policy pass',
+    s5_ev5: 'CVE fixed via Lightwell pin',
+    s5_log_done: 'payment-service v produkci s 3.14.0.rhlw-00001 — CVE-2026-1234 (ilustrativní) opravena',
+    s6_sum_without: 'Dnes: každá kritická CVE = projekt na týdny',
+    s6_sum_with: 'S Lightwell: pull request, review, merge — hotovo',
+    s7_net_l1: '6 500+ opravených závislostí při spuštění',
+    s7_net_l2: 'Podepsané balíčky, SBOM, VEX + OSV',
+    s7_net_l3: 'Přes váš Nexus / Artifactory',
+    s7_prem_l1: 'Opravy pro verze, které používáte právě vy',
+    s7_prem_l2: 'Řešení zranitelností pod embargem',
+    s7_prem_l3: 'Technical Account Manager',
+    ap_auto: 'Automaticky přehrát',
+    ap_manual: 'Přepnout na manuální procházení'
+  },
+  en: {
+    s0_title: 'What is your application built from?',
+    s0_sub: 'Interactive demo · Red Hat Lightwell',
+    s0_cta: 'Touch the screen',
+    s1_title: 'Your application = ~10% of your code + up to 90% open source',
+    s1_business: 'Your business code (~10%)',
+    s1_runtime: 'Runtime base — Red Hat Hardened Images (signed digest)',
+    s1_stat: '9.8 trillion open-source package downloads in 2025',
+    s1_remember: 'Remember this library.',
+    s2_title: 'AI changed the rules: exploit in hours, patch in weeks',
+    s2_play: 'Play the timeline',
+    s2_day0: 'Day 0: CVE disclosed',
+    s2_attacker: 'Attacker: AI exploit in hours',
+    s2_enterprise: 'Enterprise (analysis → test → approval → deploy — weeks)',
+    s2_marker: 'CVE-2026-1234 (illustrative) also affects payment-service',
+    s2_stat1_label: 'critical vulnerabilities',
+    s2_stat2_label: 'vulnerabilities in average codebase',
+    s2_stat3_label: 'AI exploit',
+    s3_heading: 'commons-lang3 3.14.0',
+    s3_illustrative: '(illustrative example)',
+    s3_c1_title: 'Upgrade to 3.18.0',
+    s3_c1_hint: '→ Click for consequence',
+    s3_c2_title: 'Custom fork and patch',
+    s3_c2_hint: '→ Click for consequence',
+    s3_c3_title: 'Accept the risk',
+    s3_c3_hint: '→ Click for consequence',
+    s3_c4_desc: 'Same version, same API — just with the security fix.',
+    s3_cta: 'There is a fourth way →',
+    s4_title: 'AI agents + 20,000 Red Hat and IBM engineers',
+    s4_lifecycle: 'Lifecycle',
+    s4_validated_btn: 'Validated',
+    s4_remediated_btn: 'Remediated',
+    s4_validated_desc: 'Verified rebuilds of upstream versions — signed, with SBOM',
+    s4_remediated_desc: 'Security-only fix for your exact version — .rhlw suffix',
+    s4_note: 'Every AI patch goes through automated tests and human validation',
+    s4_badge_count: '6,500+ fixed dependencies at launch (Java, Python)',
+    s5_title: 'The fix comes as a pull request — you already have the rest',
+    s5_st1: 'Enterprise proxy',
+    s5_st2: 'Git — Renovate PR',
+    s5_st3: 'Hermetic build',
+    s5_st4: 'Signing & policy',
+    s5_st5: 'Production + evidence',
+    s5_send: 'Send the fix',
+    s6_heading: 'Benefits',
+    s6_without: 'WITHOUT LIGHTWELL',
+    s6_with: 'WITH LIGHTWELL',
+    s6_b0_title: 'Time to secure version',
+    s6_b0_without: 'Waiting for upstream + project upgrade',
+    s6_b0_with: 'Fix for your version, as soon as Red Hat releases it',
+    s6_b0_title_w: 'Time to secure version',
+    s6_b1_title: 'Risk of changes',
+    s6_b1_without: 'New major version = regressions and recertification',
+    s6_b1_with: 'Same API, just the security fix',
+    s6_b1_title_w: 'Risk of changes',
+    s6_b2_title: 'Audit & evidence',
+    s6_b2_without: 'Manual documentation of what runs where',
+    s6_b2_with: 'Signature + SBOM + VEX/OSV automatically with the package',
+    s6_b2_title_w: 'Audit & evidence',
+    s6_b3_title: 'Scanner noise',
+    s6_b3_without: 'Hundreds of findings, manual triage',
+    s6_b3_with: 'VEX tells you what is actually fixed and what doesn\'t apply to you',
+    s6_b3_title_w: 'Scanner noise',
+    s7_title: 'How to get Red Hat Lightwell',
+    s7_net_badge: 'Available (GA)',
+    s7_net_desc: 'Annual subscription · Validated + Remediated repositories · Java and Python',
+    s7_prem_badge: 'Limited availability',
+    s7_prem_desc: 'Everything from Network + custom version fixes, pre-disclosure embargo, TAM',
+    s7_cta: 'Want to see it in your Nexus? Let\'s talk.',
+    s7_restart: 'Start over',
+    nav_back: 'Back',
+    nav_next: 'Next',
+    disclaimer: 'Illustrative demo for booth discussion · not official Red Hat documentation',
+    detail_business_title: 'Your business code',
+    detail_business_body: 'Your business logic, API endpoints, and configuration. Typically only ~10% of total application code.',
+    detail_runtime_title: 'Runtime base',
+    detail_runtime_body: 'Container base image the application runs on. Red Hat Hardened Images are verified and signed (digest).',
+    detail_oss_title: 'Open-source dependencies',
+    detail_oss_body: 'Third-party dependencies downloaded from public repositories. They make up to 90% of your application code.',
+    detail_stat_f5_title: '~3,900 critical vulnerabilities',
+    detail_stat_f5_body: 'AI model (Anthropic Mythos Preview) identified nearly 3,900 high/critical vulnerabilities in open-source software.',
+    detail_stat_f5_source: 'Source: Red Hat press May 28, 2026',
+    detail_stat_f3_title: '581 vulnerabilities',
+    detail_stat_f3_body: 'The average enterprise codebase contains 581 vulnerabilities.',
+    detail_stat_f3_source: 'Source: IBM newsroom',
+    detail_stat_f4_title: 'AI exploit for ~$50',
+    detail_stat_f4_body: 'AI generates a working exploit for around $50.',
+    detail_stat_f4_source: 'Source: IBM newsroom',
+    detail_c1_title: 'Upgrade to 3.18.0',
+    detail_c1_body: 'New API, regressions, recertification. Weeks to months of work.',
+    detail_c2_title: 'Custom fork and patch',
+    detail_c2_body: 'From now on, you maintain your own branch of the library. Forever.',
+    detail_c3_title: 'Accept the risk',
+    detail_c3_body: 'The window for the attacker stays open. An exploit already exists.',
+    detail_card4_title: 'Red Hat Lightwell',
+    detail_card4_body: 'Version 3.14.0.rhlw-00001 — same version, same API, just with the security fix. Signed package with SBOM and VEX/OSV metadata. OSV advisory RHLW-2026-0042 (illustrative) with fixed event pointing to the patched version.',
+    detail_offer_network_title: 'Lightwell Network',
+    detail_offer_network_body: 'Available (GA) since July 8, 2026. Annual subscription. Validated + Remediated repositories for Java and Python. Consumed via packages.redhat.com through your existing Nexus / Artifactory.',
+    detail_offer_premier_title: 'Lightwell Clearinghouse Premier',
+    detail_offer_premier_body: 'Limited availability. Everything from Network + custom version fixes, pre-disclosure embargo, TAM (Technical Account Manager). CEE availability verified by account team.',
+    phase_0: 'Identification and onboarding of open-source components into the catalog.',
+    phase_1: 'Distribution of signed packages via packages.redhat.com.',
+    phase_2: 'Automated tests and human validation of every fix.',
+    phase_3: 'Deployment through the customer\'s existing pipeline.',
+    phase_4: 'Contributing fixes back to upstream projects.',
+    phase_5: 'Coordinated vulnerability disclosure.',
+    station_0_what: 'Signed Lightwell repositories with verified and fixed packages.',
+    station_0_role: 'Lightwell hosts fixed versions of dependencies.',
+    station_1_what: 'Nexus / Artifactory pulls packages only from packages.redhat.com, no fallback to Maven Central.',
+    station_1_role: 'Lightwell is compatible with standard proxy servers.',
+    station_2_what: 'Renovate bot opens a pull request with the new pin; the team reviews and merges it.',
+    station_2_role: 'The fix comes automatically as a PR — no manual intervention.',
+    station_3_what: 'Build uses only dependencies from the proxy; application SBOM is generated.',
+    station_3_role: 'Lightwell package contains SBOM and metadata for the build.',
+    station_4_what: 'Image is signed (RHTAS), policy only allows signed digests.',
+    station_4_role: 'Lightwell artifacts are signed (Sigstore/cosign), SLSA Level 3.',
+    station_5_what: 'GitOps promotion; RHTPA/ACS confirms: CVE fixed via Lightwell pin.',
+    station_5_role: 'VEX + OSV metadata automatically document the fix status.',
+    station_what_label: 'What happens here',
+    station_role_label: 'Lightwell\'s role',
+    s1_donut: 'open source',
+    s1_lg_oss: 'Open-source libraries',
+    s1_lg_own: 'Your code',
+    s2_seg1: 'Analysis',
+    s2_seg2: 'Test',
+    s2_seg3: 'Approval',
+    s2_seg4: 'Deploy — weeks',
+    s2_ax0: 'Day 0', s2_ax1: 'hours', s2_ax2: 'days', s2_ax3: 'weeks', s2_ax4: 'months',
+    s3_c1_verdict: 'Weeks to months of work',
+    s3_c2_verdict: 'Your own maintenance, forever',
+    s3_c3_verdict: 'The window stays open',
+    s4_badge_backport: 'security-only backport',
+    s5_ev0: 'artifact signed',
+    s5_ev1: 'cache OK · no Central',
+    s5_ev2: 'PR #142 merged',
+    s5_ev3: 'build OK · SBOM 187 components',
+    s5_ev4: 'cosign ✓ · policy pass',
+    s5_ev5: 'CVE fixed via Lightwell pin',
+    s5_log_done: 'payment-service in production with 3.14.0.rhlw-00001 — CVE-2026-1234 (illustrative) fixed',
+    s6_sum_without: 'Today: every critical CVE = a weeks-long project',
+    s6_sum_with: 'With Lightwell: pull request, review, merge — done',
+    s7_net_l1: '6,500+ fixed dependencies at launch',
+    s7_net_l2: 'Signed packages, SBOM, VEX + OSV',
+    s7_net_l3: 'Through your Nexus / Artifactory',
+    s7_prem_l1: 'Fixes for the exact versions you run',
+    s7_prem_l2: 'Vulnerability handling under embargo',
+    s7_prem_l3: 'Technical Account Manager',
+    ap_auto: 'Auto-play',
+    ap_manual: 'Switch to manual browsing'
+  },
+  sk: {
+    s0_title: "Z čoho je postavená vaša aplikácia?",
+    s0_sub: "Interaktívne demo · Red Hat Lightwell",
+    s0_cta: "Dotknite sa obrazovky",
+    s1_title: "Vaša aplikácia = ~10 % vášho kódu + až 90 % open source",
+    s1_business: "Váš biznis kód (~10 %)",
+    s1_runtime: "Runtime base — Red Hat Hardened Images (podpísaný digest)",
+    s1_stat: "9,8 bilióna stiahnutí open-source balíkov za rok 2025",
+    s1_remember: "Túto knižnicu si zapamätajte.",
+    s2_title: "AI zmenila pravidlá: exploit za hodiny, patch za týždne",
+    s2_play: "Prehrať časovú os",
+    s2_day0: "Deň 0: CVE zverejnená",
+    s2_attacker: "Útočník: AI exploit za hodiny",
+    s2_enterprise: "Podnik (analýza → test → schválenie → nasadenie — týždne)",
+    s2_marker: "CVE-2026-1234 (ilustratívna) zasahuje aj payment-service",
+    s2_stat1_label: "kritických zraniteľností",
+    s2_stat2_label: "zraniteľností v priemernej codebase",
+    s2_stat3_label: "AI exploit",
+    s3_heading: "commons-lang3 3.14.0",
+    s3_illustrative: "(ilustratívny príklad)",
+    s3_c1_title: "Upgrade na 3.18.0",
+    s3_c1_hint: "→ Kliknite pre dôsledok",
+    s3_c2_title: "Vlastný fork a patch",
+    s3_c2_hint: "→ Kliknite pre dôsledok",
+    s3_c3_title: "Akceptovať riziko",
+    s3_c3_hint: "→ Kliknite pre dôsledok",
+    s3_c4_desc: "Rovnaká verzia, rovnaké API — len s bezpečnostnou opravou.",
+    s3_cta: "Existuje štvrtá cesta →",
+    s4_title: "AI agenti + 20 000 inžinierov Red Hatu a IBM",
+    s4_lifecycle: "Lifecycle",
+    s4_validated_btn: "Validated",
+    s4_remediated_btn: "Remediated",
+    s4_validated_desc: "Overené prestavby upstream verzií — podpísané, so SBOM",
+    s4_remediated_desc: "Security-only oprava presne vašej verzie — prípona .rhlw",
+    s4_note: "Každý AI patch prechádza automatickými testami a ľudskou validáciou",
+    s4_badge_count: "6 500+ opravených závislostí pri spustení (Java, Python)",
+    s5_title: "Oprava príde ako pull request — zvyšok už máte",
+    s5_st1: "Enterprise proxy",
+    s5_st2: "Git — Renovate PR",
+    s5_st3: "Hermetický build",
+    s5_st4: "Podpis a policy",
+    s5_st5: "Produkcia + evidencia",
+    s5_send: "Poslať opravu",
+    s6_heading: "Prínosy",
+    s6_without: "BEZ LIGHTWELL",
+    s6_with: "S LIGHTWELL",
+    s6_b0_title: "Čas do bezpečnej verzie",
+    s6_b0_without: "Čakanie na upstream + upgrade projekt",
+    s6_b0_with: "Oprava pre vašu verziu hneď, ako ju Red Hat vydá",
+    s6_b0_title_w: "Čas do bezpečnej verzie",
+    s6_b1_title: "Riziko zmien",
+    s6_b1_without: "Nová major verzia = regresie a recertifikácia",
+    s6_b1_with: "Rovnaké API, len bezpečnostná oprava",
+    s6_b1_title_w: "Riziko zmien",
+    s6_b2_title: "Audit a evidencia",
+    s6_b2_without: "Ručné dokladovanie, čo kde beží",
+    s6_b2_with: "Podpis + SBOM + VEX/OSV automaticky s balíkom",
+    s6_b2_title_w: "Audit a evidencia",
+    s6_b3_title: "Šum skenerov",
+    s6_b3_without: "Stovky nálezov, ručná triage",
+    s6_b3_with: "VEX povie, čo je reálne opravené a čo sa vás netýka",
+    s6_b3_title_w: "Šum skenerov",
+    s7_title: "Ako získať Red Hat Lightwell",
+    s7_net_badge: "Dostupné (GA)",
+    s7_net_desc: "Ročná subscription · repozitáre Validated + Remediated · Java a Python",
+    s7_prem_badge: "Obmedzená dostupnosť",
+    s7_prem_desc: "Všetko z Network + opravy verzií na mieru, embargo pred zverejnením, TAM",
+    s7_cta: "Chcete to vidieť vo vašom Nexuse? Poďme sa porozprávať.",
+    s7_restart: "Začať znova",
+    nav_back: "Späť",
+    nav_next: "Ďalej",
+    disclaimer: "Ilustratívne demo na diskusiu na stánku · nie je oficiálna dokumentácia Red Hat",
+    detail_business_title: "Váš biznis kód",
+    detail_business_body: "Vaša business logika, API endpointy a konfigurácia. Typicky tvorí len ~10 % celkového kódu aplikácie.",
+    detail_runtime_title: "Runtime base",
+    detail_runtime_body: "Kontajnerový base image, na ktorom aplikácia beží. Red Hat Hardened Images sú overené a podpísané (digest).",
+    detail_oss_title: "Open-source závislosti",
+    detail_oss_body: "Závislosti tretích strán stiahnuté z verejných repozitárov. Tvoria až 90 % kódu vašej aplikácie.",
+    detail_stat_f5_title: "~3 900 kritických zraniteľností",
+    detail_stat_f5_body: "AI model (Anthropic Mythos Preview) identifikoval takmer 3 900 high/critical zraniteľností v open-source softvéri.",
+    detail_stat_f5_source: "Zdroj: Red Hat press 28. 5. 2026",
+    detail_stat_f3_title: "581 zraniteľností",
+    detail_stat_f3_body: "Priemerná podniková codebase obsahuje 581 zraniteľností.",
+    detail_stat_f3_source: "Zdroj: IBM newsroom",
+    detail_stat_f4_title: "AI exploit za ~50 USD",
+    detail_stat_f4_body: "AI vygeneruje funkčný exploit za cenu okolo 50 USD.",
+    detail_stat_f4_source: "Zdroj: IBM newsroom",
+    detail_c1_title: "Upgrade na 3.18.0",
+    detail_c1_body: "Nové API, regresie, recertifikácia. Týždne až mesiace práce.",
+    detail_c2_title: "Vlastný fork a patch",
+    detail_c2_body: "Odteraz udržiavate vlastnú vetvu knižnice. Navždy.",
+    detail_c3_title: "Akceptovať riziko",
+    detail_c3_body: "Okno pre útočníka zostáva otvorené. Exploit už existuje.",
+    detail_card4_title: "Red Hat Lightwell",
+    detail_card4_body: "Verzia 3.14.0.rhlw-00001 — rovnaká verzia, rovnaké API, len s bezpečnostnou opravou. Podpísaný balík so SBOM a VEX/OSV metadátami. OSV advisory RHLW-2026-0042 (ilustratívne) s udalosťou fixed ukazuje na opravenú verziu.",
+    detail_offer_network_title: "Lightwell Network",
+    detail_offer_network_body: "Dostupné (GA) od 8. 7. 2026. Ročná subscription. Repozitáre Validated + Remediated pre Java a Python. Konzumácia z packages.redhat.com cez existujúci Nexus / Artifactory.",
+    detail_offer_premier_title: "Lightwell Clearinghouse Premier",
+    detail_offer_premier_body: "Obmedzená dostupnosť. Všetko z Network + opravy verzií na mieru, embargo pred zverejnením, TAM (Technical Account Manager). Dostupnosť v CEE overuje account tím.",
+    phase_0: "Identifikácia a onboarding open-source komponentov do katalógu.",
+    phase_1: "Distribúcia podpísaných balíkov cez packages.redhat.com.",
+    phase_2: "Automatické testy a ľudská validácia každej opravy.",
+    phase_3: "Nasadenie cez existujúcu pipeline zákazníka.",
+    phase_4: "Príspevok opráv späť do upstream projektov.",
+    phase_5: "Koordinované zverejnenie zraniteľností.",
+    station_0_what: "Podpísané Lightwell repozitáre s overenými a opravenými balíkmi.",
+    station_0_role: "Lightwell hostuje opravené verzie závislostí.",
+    station_1_what: "Nexus / Artifactory sťahuje balíky iba z packages.redhat.com, žiadny fallback na Maven Central.",
+    station_1_role: "Lightwell je kompatibilný so štandardnými proxy servermi.",
+    station_2_what: "Renovate bot otvorí pull request s novým pinom; tím ho zreviduje a zmerguje.",
+    station_2_role: "Oprava príde automaticky ako PR — žiadne ručné zásahy.",
+    station_3_what: "Build používa iba závislosti z proxy; vzniká SBOM aplikácie.",
+    station_3_role: "Lightwell balík obsahuje SBOM a metadáta pre build.",
+    station_4_what: "Image je podpísaný (RHTAS), politika pustí len podpísaný digest.",
+    station_4_role: "Lightwell artefakty sú podpísané (Sigstore/cosign), SLSA Level 3.",
+    station_5_what: "GitOps promotion; RHTPA/ACS potvrdí: CVE opravená cez Lightwell pin.",
+    station_5_role: "VEX + OSV metadáta automaticky dokumentujú stav opravy.",
+    station_what_label: "Čo sa tu deje",
+    station_role_label: "Rola Lightwellu",
+    s1_donut: "open source",
+    s1_lg_oss: "Open-source knižnice",
+    s1_lg_own: "Váš kód",
+    s2_seg1: "Analýza",
+    s2_seg2: "Test",
+    s2_seg3: "Schválenie",
+    s2_seg4: "Nasadenie — týždne",
+    s2_ax0: "Deň 0",
+    s2_ax1: "hodiny",
+    s2_ax2: "dni",
+    s2_ax3: "týždne",
+    s2_ax4: "mesiace",
+    s3_c1_verdict: "Týždne až mesiace práce",
+    s3_c2_verdict: "Vlastná údržba navždy",
+    s3_c3_verdict: "Okno zostáva otvorené",
+    s4_badge_backport: "security-only backport",
+    s5_ev0: "artefakt podpísaný",
+    s5_ev1: "cache OK · bez Central",
+    s5_ev2: "PR #142 merged",
+    s5_ev3: "build OK · SBOM 187 komponentov",
+    s5_ev4: "cosign ✓ · policy pass",
+    s5_ev5: "CVE fixed via Lightwell pin",
+    s5_log_done: "payment-service v produkcii s 3.14.0.rhlw-00001 — CVE-2026-1234 (ilustratívna) opravená",
+    s6_sum_without: "Dnes: každá kritická CVE = projekt na týždne",
+    s6_sum_with: "S Lightwell: pull request, review, merge — hotovo",
+    s7_net_l1: "6 500+ opravených závislostí pri spustení",
+    s7_net_l2: "Podpísané balíky, SBOM, VEX + OSV",
+    s7_net_l3: "Cez váš Nexus / Artifactory",
+    s7_prem_l1: "Opravy pre verzie, ktoré používate práve vy",
+    s7_prem_l2: "Riešenie zraniteľností pod embargom",
+    s7_prem_l3: "Technical Account Manager",
+    ap_auto: "Automaticky prehrať",
+    ap_manual: "Prepnúť na manuálne prechádzanie"
+  },
+  pl: {
+    s0_title: "Z czego zbudowana jest Twoja aplikacja?",
+    s0_sub: "Interaktywne demo · Red Hat Lightwell",
+    s0_cta: "Dotknij ekranu",
+    s1_title: "Twoja aplikacja = ~10 % Twojego kodu + do 90 % open source",
+    s1_business: "Twój kod biznesowy (~10 %)",
+    s1_runtime: "Runtime base — Red Hat Hardened Images (podpisany digest)",
+    s1_stat: "9,8 biliona pobrań pakietów open source w 2025 roku",
+    s1_remember: "Zapamiętaj tę bibliotekę.",
+    s2_title: "AI zmieniła zasady: exploit w godziny, patch w tygodnie",
+    s2_play: "Odtwórz oś czasu",
+    s2_day0: "Dzień 0: CVE opublikowane",
+    s2_attacker: "Atakujący: AI exploit w kilka godzin",
+    s2_enterprise: "Firma (analiza → test → zatwierdzenie → wdrożenie — tygodnie)",
+    s2_marker: "CVE-2026-1234 (przykład) dotyczy także payment-service",
+    s2_stat1_label: "krytycznych podatności",
+    s2_stat2_label: "podatności w przeciętnej bazie kodu",
+    s2_stat3_label: "AI exploit",
+    s3_heading: "commons-lang3 3.14.0",
+    s3_illustrative: "(przykład ilustracyjny)",
+    s3_c1_title: "Upgrade do 3.18.0",
+    s3_c1_hint: "→ Kliknij, aby zobaczyć skutek",
+    s3_c2_title: "Własny fork i patch",
+    s3_c2_hint: "→ Kliknij, aby zobaczyć skutek",
+    s3_c3_title: "Zaakceptować ryzyko",
+    s3_c3_hint: "→ Kliknij, aby zobaczyć skutek",
+    s3_c4_desc: "Ta sama wersja, to samo API — tylko z poprawką bezpieczeństwa.",
+    s3_cta: "Jest czwarta droga →",
+    s4_title: "Agenci AI + 20 000 inżynierów Red Hat i IBM",
+    s4_lifecycle: "Lifecycle",
+    s4_validated_btn: "Validated",
+    s4_remediated_btn: "Remediated",
+    s4_validated_desc: "Zweryfikowane przebudowy wersji upstream — podpisane, z SBOM",
+    s4_remediated_desc: "Poprawka security-only dokładnie Twojej wersji — sufiks .rhlw",
+    s4_note: "Każdy patch AI przechodzi testy automatyczne i walidację przez ludzi",
+    s4_badge_count: "6 500+ naprawionych zależności na starcie (Java, Python)",
+    s5_title: "Poprawka przychodzi jako pull request — resztę już masz",
+    s5_st1: "Enterprise proxy",
+    s5_st2: "Git — Renovate PR",
+    s5_st3: "Hermetyczny build",
+    s5_st4: "Podpis i policy",
+    s5_st5: "Produkcja + dowody",
+    s5_send: "Wyślij poprawkę",
+    s6_heading: "Korzyści",
+    s6_without: "BEZ LIGHTWELL",
+    s6_with: "Z LIGHTWELL",
+    s6_b0_title: "Czas do bezpiecznej wersji",
+    s6_b0_without: "Czekanie na upstream + projekt upgrade",
+    s6_b0_with: "Poprawka dla Twojej wersji, gdy tylko Red Hat ją wyda",
+    s6_b0_title_w: "Czas do bezpiecznej wersji",
+    s6_b1_title: "Ryzyko zmian",
+    s6_b1_without: "Nowa wersja major = regresje i recertyfikacja",
+    s6_b1_with: "To samo API, tylko poprawka bezpieczeństwa",
+    s6_b1_title_w: "Ryzyko zmian",
+    s6_b2_title: "Audyt i dowody",
+    s6_b2_without: "Ręczne dokumentowanie, co gdzie działa",
+    s6_b2_with: "Podpis + SBOM + VEX/OSV automatycznie z pakietem",
+    s6_b2_title_w: "Audyt i dowody",
+    s6_b3_title: "Szum skanerów",
+    s6_b3_without: "Setki wyników, ręczny triage",
+    s6_b3_with: "VEX mówi, co jest naprawdę naprawione, a co Cię nie dotyczy",
+    s6_b3_title_w: "Szum skanerów",
+    s7_title: "Jak zdobyć Red Hat Lightwell",
+    s7_net_badge: "Dostępne (GA)",
+    s7_net_desc: "Roczna subskrypcja · repozytoria Validated + Remediated · Java i Python",
+    s7_prem_badge: "Ograniczona dostępność",
+    s7_prem_desc: "Wszystko z Network + poprawki wersji na zamówienie, embargo przed publikacją, TAM",
+    s7_cta: "Chcesz to zobaczyć w swoim Nexusie? Porozmawiajmy.",
+    s7_restart: "Zacznij od nowa",
+    nav_back: "Wstecz",
+    nav_next: "Dalej",
+    disclaimer: "Demo ilustracyjne do rozmowy na stoisku · nie jest oficjalną dokumentacją Red Hat",
+    detail_business_title: "Twój kod biznesowy",
+    detail_business_body: "Twoja logika biznesowa, endpointy API i konfiguracja. Zwykle tylko ~10 % całego kodu aplikacji.",
+    detail_runtime_title: "Runtime base",
+    detail_runtime_body: "Kontenerowy obraz bazowy, na którym działa aplikacja. Red Hat Hardened Images są zweryfikowane i podpisane (digest).",
+    detail_oss_title: "Zależności open source",
+    detail_oss_body: "Zależności firm trzecich pobrane z publicznych repozytoriów. Stanowią do 90 % kodu Twojej aplikacji.",
+    detail_stat_f5_title: "~3 900 krytycznych podatności",
+    detail_stat_f5_body: "Model AI (Anthropic Mythos Preview) zidentyfikował blisko 3 900 podatności high/critical w oprogramowaniu open source.",
+    detail_stat_f5_source: "Źródło: Red Hat press, 28.05.2026",
+    detail_stat_f3_title: "581 podatności",
+    detail_stat_f3_body: "Przeciętna firmowa baza kodu zawiera 581 podatności.",
+    detail_stat_f3_source: "Źródło: IBM newsroom",
+    detail_stat_f4_title: "AI exploit za ~50 USD",
+    detail_stat_f4_body: "AI generuje działający exploit za około 50 USD.",
+    detail_stat_f4_source: "Źródło: IBM newsroom",
+    detail_c1_title: "Upgrade do 3.18.0",
+    detail_c1_body: "Nowe API, regresje, recertyfikacja. Tygodnie lub miesiące pracy.",
+    detail_c2_title: "Własny fork i patch",
+    detail_c2_body: "Od teraz utrzymujesz własną gałąź biblioteki. Na zawsze.",
+    detail_c3_title: "Zaakceptować ryzyko",
+    detail_c3_body: "Okno dla atakującego pozostaje otwarte. Exploit już istnieje.",
+    detail_card4_title: "Red Hat Lightwell",
+    detail_card4_body: "Wersja 3.14.0.rhlw-00001 — ta sama wersja, to samo API, tylko z poprawką bezpieczeństwa. Podpisany pakiet z metadanymi SBOM i VEX/OSV. OSV advisory RHLW-2026-0042 (przykład) ze zdarzeniem fixed wskazuje naprawioną wersję.",
+    detail_offer_network_title: "Lightwell Network",
+    detail_offer_network_body: "Dostępne (GA) od 8.07.2026. Roczna subskrypcja. Repozytoria Validated + Remediated dla Javy i Pythona. Konsumpcja z packages.redhat.com przez istniejący Nexus / Artifactory.",
+    detail_offer_premier_title: "Lightwell Clearinghouse Premier",
+    detail_offer_premier_body: "Ograniczona dostępność. Wszystko z Network + poprawki wersji na zamówienie, embargo przed publikacją, TAM (Technical Account Manager). Dostępność w CEE weryfikuje zespół account.",
+    phase_0: "Identyfikacja i onboarding komponentów open source do katalogu.",
+    phase_1: "Dystrybucja podpisanych pakietów przez packages.redhat.com.",
+    phase_2: "Testy automatyczne i walidacja każdej poprawki przez ludzi.",
+    phase_3: "Wdrożenie przez istniejący pipeline klienta.",
+    phase_4: "Wkład poprawek z powrotem do projektów upstream.",
+    phase_5: "Skoordynowane ujawnienie podatności.",
+    station_0_what: "Podpisane repozytoria Lightwell ze zweryfikowanymi i naprawionymi pakietami.",
+    station_0_role: "Lightwell hostuje naprawione wersje zależności.",
+    station_1_what: "Nexus / Artifactory pobiera pakiety wyłącznie z packages.redhat.com, bez fallbacku do Maven Central.",
+    station_1_role: "Lightwell jest zgodny ze standardowymi serwerami proxy.",
+    station_2_what: "Bot Renovate otwiera pull request z nowym pinem; zespół go przegląda i merguje.",
+    station_2_role: "Poprawka przychodzi automatycznie jako PR — bez ręcznych zmian.",
+    station_3_what: "Build używa tylko zależności z proxy; powstaje SBOM aplikacji.",
+    station_3_role: "Pakiet Lightwell zawiera SBOM i metadane dla builda.",
+    station_4_what: "Obraz jest podpisany (RHTAS), policy przepuszcza tylko podpisany digest.",
+    station_4_role: "Artefakty Lightwell są podpisane (Sigstore/cosign), SLSA Level 3.",
+    station_5_what: "GitOps promotion; RHTPA/ACS potwierdza: CVE naprawione przez pin Lightwell.",
+    station_5_role: "Metadane VEX + OSV automatycznie dokumentują stan poprawki.",
+    station_what_label: "Co się tu dzieje",
+    station_role_label: "Rola Lightwell",
+    s1_donut: "open source",
+    s1_lg_oss: "Biblioteki open source",
+    s1_lg_own: "Twój kod",
+    s2_seg1: "Analiza",
+    s2_seg2: "Test",
+    s2_seg3: "Zatwierdzenie",
+    s2_seg4: "Wdrożenie — tygodnie",
+    s2_ax0: "Dzień 0",
+    s2_ax1: "godziny",
+    s2_ax2: "dni",
+    s2_ax3: "tygodnie",
+    s2_ax4: "miesiące",
+    s3_c1_verdict: "Tygodnie lub miesiące pracy",
+    s3_c2_verdict: "Własne utrzymanie na zawsze",
+    s3_c3_verdict: "Okno pozostaje otwarte",
+    s4_badge_backport: "security-only backport",
+    s5_ev0: "artefakt podpisany",
+    s5_ev1: "cache OK · bez Central",
+    s5_ev2: "PR #142 merged",
+    s5_ev3: "build OK · SBOM 187 komponentów",
+    s5_ev4: "cosign ✓ · policy pass",
+    s5_ev5: "CVE fixed via Lightwell pin",
+    s5_log_done: "payment-service na produkcji z 3.14.0.rhlw-00001 — CVE-2026-1234 (przykład) naprawione",
+    s6_sum_without: "Dziś: każde krytyczne CVE = projekt na tygodnie",
+    s6_sum_with: "Z Lightwell: pull request, review, merge — gotowe",
+    s7_net_l1: "6 500+ naprawionych zależności na starcie",
+    s7_net_l2: "Podpisane pakiety, SBOM, VEX + OSV",
+    s7_net_l3: "Przez Twój Nexus / Artifactory",
+    s7_prem_l1: "Poprawki dla wersji, których używasz właśnie Ty",
+    s7_prem_l2: "Obsługa podatności pod embargiem",
+    s7_prem_l3: "Technical Account Manager",
+    ap_auto: "Odtwarzaj automatycznie",
+    ap_manual: "Przełącz na przeglądanie ręczne"
+  },
+  ro: {
+    s0_title: "Din ce este construită aplicația dumneavoastră?",
+    s0_sub: "Demo interactiv · Red Hat Lightwell",
+    s0_cta: "Atingeți ecranul",
+    s1_title: "Aplicația dvs. = ~10 % codul dvs. + până la 90 % open source",
+    s1_business: "Codul dvs. de business (~10 %)",
+    s1_runtime: "Runtime base — Red Hat Hardened Images (digest semnat)",
+    s1_stat: "9,8 mii de miliarde de descărcări de pachete open source în 2025",
+    s1_remember: "Rețineți această bibliotecă.",
+    s2_title: "AI a schimbat regulile: exploit în ore, patch în săptămâni",
+    s2_play: "Redați cronologia",
+    s2_day0: "Ziua 0: CVE publicată",
+    s2_attacker: "Atacator: exploit AI în câteva ore",
+    s2_enterprise: "Companie (analiză → test → aprobare → implementare — săptămâni)",
+    s2_marker: "CVE-2026-1234 (ilustrativ) afectează și payment-service",
+    s2_stat1_label: "vulnerabilități critice",
+    s2_stat2_label: "vulnerabilități într-o bază de cod medie",
+    s2_stat3_label: "exploit AI",
+    s3_heading: "commons-lang3 3.14.0",
+    s3_illustrative: "(exemplu ilustrativ)",
+    s3_c1_title: "Upgrade la 3.18.0",
+    s3_c1_hint: "→ Apăsați pentru consecință",
+    s3_c2_title: "Fork și patch propriu",
+    s3_c2_hint: "→ Apăsați pentru consecință",
+    s3_c3_title: "Acceptarea riscului",
+    s3_c3_hint: "→ Apăsați pentru consecință",
+    s3_c4_desc: "Aceeași versiune, același API — doar cu remedierea de securitate.",
+    s3_cta: "Există o a patra cale →",
+    s4_title: "Agenți AI + 20 000 de ingineri Red Hat și IBM",
+    s4_lifecycle: "Lifecycle",
+    s4_validated_btn: "Validated",
+    s4_remediated_btn: "Remediated",
+    s4_validated_desc: "Reconstrucții verificate ale versiunilor upstream — semnate, cu SBOM",
+    s4_remediated_desc: "Remediere security-only exact pentru versiunea dvs. — sufixul .rhlw",
+    s4_note: "Fiecare patch AI trece prin teste automate și validare umană",
+    s4_badge_count: "6 500+ dependențe remediate la lansare (Java, Python)",
+    s5_title: "Remedierea vine ca pull request — restul îl aveți deja",
+    s5_st1: "Enterprise proxy",
+    s5_st2: "Git — Renovate PR",
+    s5_st3: "Build hermetic",
+    s5_st4: "Semnare și policy",
+    s5_st5: "Producție + dovezi",
+    s5_send: "Trimiteți remedierea",
+    s6_heading: "Beneficii",
+    s6_without: "FĂRĂ LIGHTWELL",
+    s6_with: "CU LIGHTWELL",
+    s6_b0_title: "Timp până la versiunea sigură",
+    s6_b0_without: "Așteptarea upstream + proiect de upgrade",
+    s6_b0_with: "Remediere pentru versiunea dvs., imediat ce Red Hat o publică",
+    s6_b0_title_w: "Timp până la versiunea sigură",
+    s6_b1_title: "Riscul schimbărilor",
+    s6_b1_without: "Versiune majoră nouă = regresii și recertificare",
+    s6_b1_with: "Același API, doar remedierea de securitate",
+    s6_b1_title_w: "Riscul schimbărilor",
+    s6_b2_title: "Audit și dovezi",
+    s6_b2_without: "Documentare manuală a ce rulează unde",
+    s6_b2_with: "Semnătură + SBOM + VEX/OSV automat cu pachetul",
+    s6_b2_title_w: "Audit și dovezi",
+    s6_b3_title: "Zgomotul scanerelor",
+    s6_b3_without: "Sute de constatări, triaj manual",
+    s6_b3_with: "VEX spune ce este remediat cu adevărat și ce nu vă privește",
+    s6_b3_title_w: "Zgomotul scanerelor",
+    s7_title: "Cum obțineți Red Hat Lightwell",
+    s7_net_badge: "Disponibil (GA)",
+    s7_net_desc: "Abonament anual · repozitoriile Validated + Remediated · Java și Python",
+    s7_prem_badge: "Disponibilitate limitată",
+    s7_prem_desc: "Tot ce oferă Network + remedieri de versiuni la cerere, embargo înainte de publicare, TAM",
+    s7_cta: "Vreți să vedeți asta în Nexus-ul dvs.? Haideți să discutăm.",
+    s7_restart: "Începeți din nou",
+    nav_back: "Înapoi",
+    nav_next: "Înainte",
+    disclaimer: "Demo ilustrativ pentru discuții la stand · nu este documentație oficială Red Hat",
+    detail_business_title: "Codul dvs. de business",
+    detail_business_body: "Logica de business, endpoint-urile API și configurația. De regulă doar ~10 % din codul total al aplicației.",
+    detail_runtime_title: "Runtime base",
+    detail_runtime_body: "Imaginea de bază a containerului pe care rulează aplicația. Red Hat Hardened Images sunt verificate și semnate (digest).",
+    detail_oss_title: "Dependențe open source",
+    detail_oss_body: "Dependențe terțe descărcate din repozitorii publice. Reprezintă până la 90 % din codul aplicației dvs.",
+    detail_stat_f5_title: "~3 900 de vulnerabilități critice",
+    detail_stat_f5_body: "Modelul AI (Anthropic Mythos Preview) a identificat aproape 3 900 de vulnerabilități high/critical în software-ul open source.",
+    detail_stat_f5_source: "Sursă: Red Hat press, 28.05.2026",
+    detail_stat_f3_title: "581 de vulnerabilități",
+    detail_stat_f3_body: "O bază de cod enterprise medie conține 581 de vulnerabilități.",
+    detail_stat_f3_source: "Sursă: IBM newsroom",
+    detail_stat_f4_title: "Exploit AI pentru ~50 USD",
+    detail_stat_f4_body: "AI generează un exploit funcțional pentru aproximativ 50 USD.",
+    detail_stat_f4_source: "Sursă: IBM newsroom",
+    detail_c1_title: "Upgrade la 3.18.0",
+    detail_c1_body: "API nou, regresii, recertificare. Săptămâni sau luni de muncă.",
+    detail_c2_title: "Fork și patch propriu",
+    detail_c2_body: "De acum întrețineți propria ramură a bibliotecii. Pentru totdeauna.",
+    detail_c3_title: "Acceptarea riscului",
+    detail_c3_body: "Fereastra pentru atacator rămâne deschisă. Exploit-ul există deja.",
+    detail_card4_title: "Red Hat Lightwell",
+    detail_card4_body: "Versiunea 3.14.0.rhlw-00001 — aceeași versiune, același API, doar cu remedierea de securitate. Pachet semnat cu metadate SBOM și VEX/OSV. OSV advisory RHLW-2026-0042 (ilustrativ) cu evenimentul fixed indică versiunea remediată.",
+    detail_offer_network_title: "Lightwell Network",
+    detail_offer_network_body: "Disponibil (GA) din 8.07.2026. Abonament anual. Repozitoriile Validated + Remediated pentru Java și Python. Consum din packages.redhat.com prin Nexus / Artifactory existent.",
+    detail_offer_premier_title: "Lightwell Clearinghouse Premier",
+    detail_offer_premier_body: "Disponibilitate limitată. Tot ce oferă Network + remedieri de versiuni la cerere, embargo înainte de publicare, TAM (Technical Account Manager). Disponibilitatea în CEE este verificată de echipa de cont.",
+    phase_0: "Identificarea și onboarding-ul componentelor open source în catalog.",
+    phase_1: "Distribuția pachetelor semnate prin packages.redhat.com.",
+    phase_2: "Teste automate și validare umană pentru fiecare remediere.",
+    phase_3: "Implementare prin pipeline-ul existent al clientului.",
+    phase_4: "Contribuția remedierilor înapoi în proiectele upstream.",
+    phase_5: "Publicarea coordonată a vulnerabilităților.",
+    station_0_what: "Repozitorii Lightwell semnate cu pachete verificate și remediate.",
+    station_0_role: "Lightwell găzduiește versiunile remediate ale dependențelor.",
+    station_1_what: "Nexus / Artifactory descarcă pachete doar din packages.redhat.com, fără fallback la Maven Central.",
+    station_1_role: "Lightwell este compatibil cu serverele proxy standard.",
+    station_2_what: "Botul Renovate deschide un pull request cu noul pin; echipa îl revizuiește și îl integrează.",
+    station_2_role: "Remedierea vine automat ca PR — fără intervenții manuale.",
+    station_3_what: "Build-ul folosește doar dependențe din proxy; se generează SBOM-ul aplicației.",
+    station_3_role: "Pachetul Lightwell conține SBOM și metadate pentru build.",
+    station_4_what: "Imaginea este semnată (RHTAS), policy-ul permite doar digest-ul semnat.",
+    station_4_role: "Artefactele Lightwell sunt semnate (Sigstore/cosign), SLSA Level 3.",
+    station_5_what: "GitOps promotion; RHTPA/ACS confirmă: CVE remediată prin pin-ul Lightwell.",
+    station_5_role: "Metadatele VEX + OSV documentează automat starea remedierii.",
+    station_what_label: "Ce se întâmplă aici",
+    station_role_label: "Rolul Lightwell",
+    s1_donut: "open source",
+    s1_lg_oss: "Biblioteci open source",
+    s1_lg_own: "Codul dvs.",
+    s2_seg1: "Analiză",
+    s2_seg2: "Test",
+    s2_seg3: "Aprobare",
+    s2_seg4: "Implementare — săptămâni",
+    s2_ax0: "Ziua 0",
+    s2_ax1: "ore",
+    s2_ax2: "zile",
+    s2_ax3: "săptămâni",
+    s2_ax4: "luni",
+    s3_c1_verdict: "Săptămâni sau luni de muncă",
+    s3_c2_verdict: "Întreținere proprie pentru totdeauna",
+    s3_c3_verdict: "Fereastra rămâne deschisă",
+    s4_badge_backport: "security-only backport",
+    s5_ev0: "artefact semnat",
+    s5_ev1: "cache OK · fără Central",
+    s5_ev2: "PR #142 merged",
+    s5_ev3: "build OK · SBOM 187 componente",
+    s5_ev4: "cosign ✓ · policy pass",
+    s5_ev5: "CVE fixed via Lightwell pin",
+    s5_log_done: "payment-service în producție cu 3.14.0.rhlw-00001 — CVE-2026-1234 (ilustrativ) remediată",
+    s6_sum_without: "Astăzi: fiecare CVE critică = un proiect de săptămâni",
+    s6_sum_with: "Cu Lightwell: pull request, review, merge — gata",
+    s7_net_l1: "6 500+ dependențe remediate la lansare",
+    s7_net_l2: "Pachete semnate, SBOM, VEX + OSV",
+    s7_net_l3: "Prin Nexus / Artifactory al dvs.",
+    s7_prem_l1: "Remedieri pentru versiunile pe care le folosiți dvs.",
+    s7_prem_l2: "Gestionarea vulnerabilităților sub embargo",
+    s7_prem_l3: "Technical Account Manager",
+    ap_auto: "Redare automată",
+    ap_manual: "Treceți la navigare manuală"
+  }
+};
+
+/* ============================== STATE ============================== */
+let lang = 'cs';
+let currentScene = 0;
+let markerActive = false;
+let markerUpgraded = false;
+let exploredChoices = new Set();
+let card4Revealed = false;
+let benefitToggled = false;
+let s5AnimRunning = false;
+let idleTimer = null;
+const IDLE_MS = 90000;
+const TOTAL_SCENES = 8;
+let cursorTimer = null;
+let stageScale = 1;
+const stageEl = document.getElementById('stage');
+const glowEl = document.getElementById('glow');
+const storyBar = document.getElementById('storyBar');
+const SCENE_MOOD = ['blue','blue','red','gold','green','green','green','blue'];
+const SCENE_PHASE = ['neutral','neutral','problem','problem','solution','solution','solution','neutral'];
+
+/* ============================== STAGE FIT ============================== */
+function fitStage() {
+  const sw = window.innerWidth, sh = window.innerHeight;
+  stageScale = Math.min(sw / 1920, sh / 1080);
+  const ox = Math.round((sw - 1920 * stageScale) / 2);
+  const oy = Math.round((sh - 1080 * stageScale) / 2);
+  stageEl.style.transform = 'translate(' + ox + 'px,' + oy + 'px) scale(' + stageScale + ')';
+}
+window.addEventListener('resize', fitStage);
+/* Rect of an element in stage coordinates (1920x1080 space) */
+function stageRect(el) {
+  const r = el.getBoundingClientRect();
+  const st = stageEl.getBoundingClientRect();
+  return { left: (r.left - st.left) / stageScale, top: (r.top - st.top) / stageScale, width: r.width / stageScale, height: r.height / stageScale };
+}
+
+/* ============================== DOM ============================== */
+const $ = (s, p) => (p || document).querySelector(s);
+const $$ = (s, p) => [...(p || document).querySelectorAll(s)];
+
+const scenes = $$('.scene');
+const dotsEl = $('#dots');
+const prevBtn = $('#prevBtn');
+const nextBtn = $('#nextBtn');
+const nav = $('#navigation');
+const topBar = $('#topBar');
+const markerEl = $('#marker');
+const markerTextEl = $('#markerText');
+const overlay = $('#overlay');
+const overlayTitle = $('#overlayTitle');
+const overlayBody = $('#overlayBody');
+const overlayClose = $('#overlayClose');
+const overlayBackdrop = $('#overlayBackdrop');
+
+/* ============================== LIBRARIES GRID ============================== */
+const LIBS = [
+  'spring-core','jackson-databind','log4j-core','commons-lang3','guava','netty-all',
+  'hibernate-core','slf4j-api','snakeyaml','tomcat-embed-core','micrometer-core','reactor-core',
+  'spring-security-core','bouncy-castle','commons-io','httpclient5',
+  'jackson-core','logback-classic','spring-boot-auto','spring-web',
+  'jakarta.persistence','spring-data-jpa','commons-codec','flyway-core'
+];
+
+function buildLibsGrid() {
+  const grid = $('#libsGrid');
+  grid.innerHTML = '';
+  LIBS.forEach(lib => {
+    const tile = document.createElement('div');
+    tile.className = 'lib-tile';
+    tile.textContent = lib === 'commons-lang3' ? 'commons-lang3 3.14.0' : lib;
+    tile.dataset.lib = lib;
+    if (lib === 'commons-lang3') {
+      tile.addEventListener('click', () => activateMarker(true));
+    } else {
+      tile.addEventListener('click', () => openOverlay(T[lang].detail_oss_title, T[lang].detail_oss_body, '', 'gold'));
+    }
+    grid.appendChild(tile);
+  });
+}
+
+/* ============================== FLOW PACKAGES (Scene 0) ============================== */
+function buildPackagesFlow() {
+  const container = $('#packagesFlow');
+  container.innerHTML = '';
+  const names = ['spring-core','jackson-databind','log4j-core','commons-lang3','guava','netty-all',
+    'hibernate-core','slf4j-api','snakeyaml','tomcat-embed','micrometer','reactor-core',
+    'spring-security','bouncy-castle','commons-io','httpclient5','jackson-core','logback',
+    'spring-boot','flyway-core','spring-web','commons-codec'];
+  names.forEach((name, i) => {
+    const el = document.createElement('div');
+    el.className = 'flow-pkg';
+    el.textContent = name;
+    el.style.top = (60 + (i % 7) * 130 + Math.random() * 40) + 'px';
+    el.style.animationDuration = (10 + Math.random() * 12) + 's';
+    el.style.animationDelay = (-Math.random() * 20) + 's';
+    el.style.opacity = 0.15 + Math.random() * 0.25;
+    el.style.fontSize = (12 + Math.random() * 4) + 'px';
+    container.appendChild(el);
+  });
+}
+
+/* ============================== STEPPER (Scene 4) ============================== */
+const PHASES = ['Onboarding','Distribution','Validation','Deployment','Upstream contribution','Disclosure'];
+function buildStepper() {
+  const circle = $('#stepperCircle');
+  $$('.phase-node', circle).forEach(n => n.remove());
+  const cx = 210, cy = 210, r = 165;
+  PHASES.forEach((name, i) => {
+    const angle = (i * 60 - 90) * Math.PI / 180;
+    const x = cx + r * Math.cos(angle) - 60;
+    const y = cy + r * Math.sin(angle) - 28;
+    const node = document.createElement('div');
+    node.className = 'phase-node';
+    node.innerHTML = '<span class="phase-num">' + (i + 1) + '</span>' + name;
+    node.style.left = x + 'px';
+    node.style.top = y + 'px';
+    node.dataset.phase = i;
+    node.addEventListener('click', () => {
+      $$('.phase-node', circle).forEach((n, j) => {
+        n.classList.toggle('phase-active', j === i);
+        n.classList.toggle('phase-done', j < i);
+      });
+      $('#stepperArc').style.strokeDashoffset = (1068 * (1 - (i + 1) / PHASES.length)).toFixed(0);
+      openOverlay((i + 1) + ' · ' + name, T[lang]['phase_' + i], '', 'green');
+    });
+    circle.appendChild(node);
+  });
+}
+
+function resetStepperArc() {
+  $('#stepperArc').style.strokeDashoffset = '1068';
+  $$('.phase-node').forEach(n => n.classList.remove('phase-active', 'phase-done'));
+}
+
+/* ============================== DOTS ============================== */
+function buildDots() {
+  dotsEl.innerHTML = '';
+  for (let i = 0; i < TOTAL_SCENES; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'dot dot-' + SCENE_PHASE[i] + (i === currentScene ? ' active' : '');
+    dotsEl.appendChild(dot);
+  }
+}
+
+/* ============================== NAVIGATION ============================== */
+function goToScene(n, dir) {
+  if (n < 0 || n >= TOTAL_SCENES || n === currentScene) return;
+  const direction = dir || (n > currentScene ? 1 : -1);
+  const prev = scenes[currentScene];
+  const next = scenes[n];
+
+  prev.classList.remove('active');
+  prev.style.transform = direction > 0 ? 'translateX(-30px)' : 'translateX(30px)';
+  prev.style.opacity = '0';
+  setTimeout(() => {
+    prev.style.transform = '';
+    prev.style.opacity = '';
+  }, 400);
+
+  next.style.transform = direction > 0 ? 'translateX(30px)' : 'translateX(-30px)';
+  next.style.opacity = '0';
+  void next.offsetWidth;
+  next.classList.add('active');
+  requestAnimationFrame(() => {
+    next.style.transform = 'translateX(0)';
+    next.style.opacity = '1';
+  });
+
+  currentScene = n;
+  closeOverlay();
+  updateNav();
+  updateMarker();
+  updateMood(n);
+  onSceneEnter(n);
+  resetIdle();
+}
+
+function updateMood(n) {
+  glowEl.className = 'glow-' + SCENE_MOOD[n];
+  storyBar.style.width = (n === 0 ? 0 : (n / (TOTAL_SCENES - 1)) * 100) + '%';
+}
+
+function updateNav() {
+  const isAttract = currentScene === 0;
+  nav.classList.toggle('hidden-nav', isAttract);
+  topBar.classList.toggle('hidden-bar', isAttract);
+  prevBtn.disabled = currentScene <= 1;
+  nextBtn.disabled = currentScene >= TOTAL_SCENES - 1;
+  $$('.dot', dotsEl).forEach((d, i) => { d.classList.toggle('active', i === currentScene); d.classList.toggle('dot-done', i < currentScene); });
+}
+
+/* ============================== MARKER ============================== */
+function updateMarker() {
+  const show = markerActive && currentScene >= 1 && currentScene <= 6;
+  markerEl.classList.toggle('visible', show);
+  if (currentScene >= 5 && !markerUpgraded) {
+    markerUpgraded = true;
+  }
+  if (markerUpgraded) {
+    markerEl.classList.add('upgraded');
+    markerTextEl.textContent = 'commons-lang3 3.14.0.rhlw-00001';
+  } else {
+    markerEl.classList.remove('upgraded');
+    markerTextEl.textContent = 'commons-lang3 3.14.0';
+  }
+}
+
+/* ============================== OVERLAY ============================== */
+function openOverlay(title, body, source, accent) {
+  const panel = $('#overlayPanel');
+  panel.className = 'acc-' + (accent || 'blue');
+  overlayTitle.textContent = title;
+  overlayBody.innerHTML = body + (source ? '<div class="source">' + source + '</div>' : '');
+  overlay.classList.add('open');
+  resetIdle();
+}
+function closeOverlay() {
+  overlay.classList.remove('open');
+}
+overlayClose.addEventListener('click', closeOverlay);
+overlayBackdrop.addEventListener('click', closeOverlay);
+
+/* ============================== TOAST ============================== */
+let toastEl = null;
+function showToast(msg) {
+  if (toastEl) toastEl.remove();
+  toastEl = document.createElement('div');
+  toastEl.style.cssText = 'position:fixed;bottom:110px;left:50%;transform:translateX(-50%);background:var(--gold);color:#000;padding:12px 24px;border-radius:8px;font-weight:700;font-size:16px;z-index:300;animation:fadeInUp 0.3s ease-out both;pointer-events:none;';
+  toastEl.textContent = msg;
+  document.body.appendChild(toastEl);
+  setTimeout(() => { if (toastEl) { toastEl.style.opacity = '0'; toastEl.style.transition = 'opacity 0.3s'; setTimeout(() => toastEl && toastEl.remove(), 300); } }, 2500);
+}
+
+/* ============================== I18N APPLY ============================== */
+function applyLang() {
+  const dict = T[lang];
+  $$('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (dict[key] !== undefined) el.textContent = dict[key];
+  });
+  document.documentElement.lang = lang;
+  const log = $('#logLine');
+  if (log && log.classList.contains('ok')) log.textContent = '✓ ' + dict.s5_log_done;
+  $$('#langSwitch button').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
+  updateMarker();
+}
+
+$('#langSwitch').addEventListener('click', e => {
+  const b = e.target.closest('button[data-lang]');
+  if (!b || !T[b.dataset.lang]) return;
+  lang = b.dataset.lang;
+  applyLang();
+  updateAutoplayBtn();
+  updateBenefitSummary();
+  $('#repoDesc').textContent = T[lang][$('#repoDesc').dataset.i18n];
+  resetIdle();
+});
+
+/* ============================== SCENE-SPECIFIC ============================== */
+
+function onSceneEnter(n) {
+  if (n === 2) {
+    resetTimeline();
+    if (!markerActive) activateMarker(false);
+    setTimeout(playTimeline, 500);
+    runCounters();
+  }
+  if (n === 4) resetStepperArc();
+  if (n === 5) resetPipeline();
+}
+
+function activateMarker(toast) {
+  markerActive = true;
+  const tile = $('.lib-tile[data-lib="commons-lang3"]');
+  if (tile) tile.classList.add('highlight');
+  updateMarker();
+  if (toast) showToast(T[lang].s1_remember);
+}
+
+/* Count-up numbers (scene 2) */
+const LOCALES = { cs: 'cs-CZ', sk: 'sk-SK', pl: 'pl-PL', ro: 'ro-RO', en: 'en-US' };
+function fmtNum(n) { return n.toLocaleString(LOCALES[lang] || 'en-US'); }
+function runCounters() {
+  $$('.count').forEach(el => {
+    const target = +el.dataset.count, pre = el.dataset.prefix || '', suf = el.dataset.suffix || '';
+    const t0 = performance.now(), dur = 1400;
+    function tick(t) {
+      const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = pre + fmtNum(Math.round(target * e)) + suf;
+      if (k < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+}
+
+/* Scene 1 - layers */
+$('.layer-business').addEventListener('click', () => openOverlay(T[lang].detail_business_title, T[lang].detail_business_body, '', 'blue'));
+$('.layer-runtime').addEventListener('click', () => openOverlay(T[lang].detail_runtime_title, T[lang].detail_runtime_body, '', 'red'));
+
+/* Scene 0 - click anywhere */
+$('#scene0').addEventListener('click', () => goToScene(1, 1));
+
+/* Scene 2 - stats */
+$$('.stat-tile[data-detail]').forEach(tile => {
+  tile.addEventListener('click', () => {
+    const key = tile.dataset.detail;
+    openOverlay(T[lang]['detail_' + key + '_title'], T[lang]['detail_' + key + '_body'], T[lang]['detail_' + key + '_source'] || '', key === 'stat_f3' ? 'gold' : 'red');
+  });
+});
+
+/* Scene 2 - timeline animation */
+function resetTimeline() {
+  const tracks = $('#timelineTracks');
+  tracks.classList.remove('playing');
+  tracks.classList.add('collapsed');
+  const token = $('#timelineToken');
+  token.classList.remove('visible');
+  token.style.transition = 'none';
+  token.style.left = '5%';
+}
+
+function playTimeline() {
+  resetTimeline();
+  const tracks = $('#timelineTracks');
+  void tracks.offsetWidth;
+  setTimeout(() => {
+    tracks.classList.remove('collapsed');
+    tracks.classList.add('playing');
+    const token = $('#timelineToken');
+    token.style.transition = 'left 2.5s ease-in-out, opacity 0.5s';
+    token.classList.add('visible');
+    setTimeout(() => { token.style.left = '55%'; }, 100);
+  }, 60);
+}
+
+$('#playTimeline').addEventListener('click', () => { playTimeline(); runCounters(); resetIdle(); });
+
+/* Scene 3 - choices */
+$$('.choice-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const n = card.dataset.choice;
+    exploredChoices.add(n);
+    card.classList.add('explored');
+    openOverlay(T[lang]['detail_c' + n + '_title'], T[lang]['detail_c' + n + '_body'], '', 'red');
+    if (exploredChoices.size >= 1) {
+      revealCard4();
+    }
+  });
+});
+
+function revealCard4() {
+  if (card4Revealed) return;
+  card4Revealed = true;
+  $('#card4Wrap').classList.add('revealed');
+  $('#ctaFourthWay').classList.add('glow');
+}
+
+$('#ctaFourthWay').addEventListener('click', () => {
+  revealCard4();
+  goToScene(4, 1);
+});
+
+$('.card4').addEventListener('click', () => {
+  openOverlay(T[lang].detail_card4_title, T[lang].detail_card4_body, '', 'green');
+});
+
+/* Scene 4 - repo toggle */
+$$('#repoToggle .repo-toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#repoToggle .repo-toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const repo = btn.dataset.repo;
+    const descEl = $('#repoDesc');
+    descEl.dataset.i18n = 's4_' + repo + '_desc';
+    descEl.textContent = T[lang]['s4_' + repo + '_desc'];
+    applyRepo(repo);
+    resetIdle();
+  });
+});
+
+function applyRepo(repo) {
+  const remediated = repo === 'remediated';
+  $('#pkgVersion').textContent = remediated ? '3.14.0.rhlw-00001' : '3.14.0';
+  $('#pkgCard').classList.toggle('validated', !remediated);
+  $('#pkgSeal').innerHTML = remediated ? 'RED HAT<br>SIGNED' : 'UPSTREAM<br>PARITY';
+  const badges = $$('#pkgBadges .badge');
+  badges[3].style.display = remediated ? '' : 'none';
+  badges[4].style.display = remediated ? '' : 'none';
+  badges.forEach(b => { b.style.animation = 'none'; void b.offsetWidth; b.style.animation = ''; });
+}
+
+/* Scene 5 - pipeline */
+function resetPipeline() {
+  s5AnimRunning = false;
+  const token = $('#pipelineToken');
+  token.classList.remove('visible');
+  token.style.left = '0';
+  $('#pipelineProgress').style.width = '0%';
+  $$('.station').forEach(s => s.classList.remove('station-reached'));
+  const log = $('#logLine');
+  log.classList.remove('show', 'ok');
+  log.textContent = '$ renovate: commons-lang3 3.14.0 → 3.14.0.rhlw-00001';
+}
+
+$$('.station').forEach(station => {
+  station.addEventListener('click', () => {
+    const idx = station.dataset.station;
+    const wh = T[lang]['station_' + idx + '_what'];
+    const rl = T[lang]['station_' + idx + '_role'];
+    const title = station.querySelector('.station-label').textContent;
+    openOverlay(title, '<strong>' + T[lang].station_what_label + ':</strong><br>' + wh + '<br><br><strong>' + T[lang].station_role_label + ':</strong><br>' + rl, '', idx >= 4 ? 'green' : 'blue');
+  });
+});
+
+$('#sendFixBtn').addEventListener('click', () => {
+  if (s5AnimRunning) return;
+  s5AnimRunning = true;
+  resetPipeline();
+  const token = $('#pipelineToken');
+  const stations = $$('.station');
+  const progress = $('#pipelineProgress');
+
+  setTimeout(() => {
+    token.classList.add('visible');
+    let step = 0;
+    $('#logLine').classList.add('show');
+    function advance() {
+      if (step >= stations.length) {
+        s5AnimRunning = false;
+        const log = $('#logLine');
+        log.textContent = '✓ ' + T[lang].s5_log_done;
+        log.classList.add('ok');
+        return;
+      }
+      const pct = (step / (stations.length - 1)) * 100;
+      const stationRect = stageRect(stations[step]);
+      const parentRect = stageRect($('#pipelineStations'));
+      const targetLeft = stationRect.left - parentRect.left + stationRect.width / 2;
+      token.style.left = targetLeft + 'px';
+      progress.style.width = pct + '%';
+      stations[step].classList.add('station-reached');
+      step++;
+      setTimeout(advance, 900);
+    }
+    advance();
+  }, 100);
+  resetIdle();
+});
+
+/* Scene 6 - benefit toggle */
+$('#benefitToggle').addEventListener('click', () => {
+  benefitToggled = !benefitToggled;
+  $('#benefitToggle').classList.toggle('toggled', benefitToggled);
+  const labels = $$('.toggle-label');
+  labels[0].classList.toggle('active-label', !benefitToggled);
+  labels[0].classList.toggle('inactive-label', benefitToggled);
+  labels[1].classList.toggle('active-label', benefitToggled);
+  labels[1].classList.toggle('inactive-label', !benefitToggled);
+  $$('.flip-inner').forEach(inner => inner.classList.toggle('flipped', benefitToggled));
+  updateBenefitSummary();
+  resetIdle();
+});
+
+function updateBenefitSummary() {
+  const el = $('#benefitSummary');
+  el.classList.toggle('good', benefitToggled);
+  el.dataset.i18n = benefitToggled ? 's6_sum_with' : 's6_sum_without';
+  el.textContent = T[lang][el.dataset.i18n];
+}
+
+$$('.flip-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const idx = card.dataset.benefit;
+    const isFlipped = benefitToggled;
+    const titleKey = isFlipped ? 's6_b' + idx + '_title_w' : 's6_b' + idx + '_title';
+    const textKey = isFlipped ? 's6_b' + idx + '_with' : 's6_b' + idx + '_without';
+    openOverlay(T[lang][titleKey], T[lang][textKey], '', isFlipped ? 'green' : 'red');
+  });
+});
+
+/* Scene 7 - offers */
+$$('.offer-card[data-detail]').forEach(card => {
+  card.addEventListener('click', () => {
+    const key = card.dataset.detail;
+    openOverlay(T[lang]['detail_' + key + '_title'], T[lang]['detail_' + key + '_body'], '', key === 'offer_network' ? 'green' : 'gold');
+  });
+});
+
+/* Manual return to the attract scene always restarts auto-play */
+function goHome() {
+  resetAll();
+  goToScene(0, -1);
+  startAutoplay();
+}
+$('#restartBtn').addEventListener('click', goHome);
+
+/* ============================== NAV BUTTONS ============================== */
+nav.addEventListener('click', e => {
+  const btn = e.target.closest('.nav-btn');
+  if (!btn || btn.disabled) return;
+  if (btn === prevBtn && currentScene > 1) {
+    goToScene(currentScene - 1, -1);
+  } else if (btn === nextBtn && currentScene < TOTAL_SCENES - 1) {
+    goToScene(currentScene + 1, 1);
+  }
+});
+
+$$('.dot', dotsEl).length || null;
+dotsEl.addEventListener('click', e => {
+  const dot = e.target.closest('.dot');
+  if (!dot) return;
+  const idx = [...dotsEl.children].indexOf(dot);
+  if (idx === 0) goHome();
+  else if (idx > 0) goToScene(idx);
+});
+
+/* ============================== HOME BUTTON ============================== */
+$('#homeBtn').addEventListener('click', goHome);
+
+/* ============================== RESET ============================== */
+function resetAll() {
+  markerActive = false;
+  markerUpgraded = false;
+  exploredChoices.clear();
+  card4Revealed = false;
+  benefitToggled = false;
+  s5AnimRunning = false;
+  $('#card4Wrap').classList.remove('revealed');
+  $('#ctaFourthWay').classList.remove('glow');
+  $$('.choice-card').forEach(c => c.classList.remove('explored'));
+  $$('.lib-tile').forEach(t => t.classList.remove('highlight'));
+  $('#benefitToggle').classList.remove('toggled');
+  $$('.toggle-label')[0].classList.add('active-label');
+  $$('.toggle-label')[0].classList.remove('inactive-label');
+  $$('.toggle-label')[1].classList.remove('active-label');
+  $$('.toggle-label')[1].classList.add('inactive-label');
+  $$('.flip-inner').forEach(inner => inner.classList.remove('flipped'));
+  $$('.phase-node').forEach(n => n.classList.remove('phase-active'));
+  $$('#repoToggle .repo-toggle-btn').forEach((b, i) => b.classList.toggle('active', i === 1));
+  $('#repoDesc').textContent = T[lang].s4_remediated_desc;
+  $('#repoDesc').dataset.i18n = 's4_remediated_desc';
+  applyRepo('remediated');
+  resetStepperArc();
+  updateBenefitSummary();
+  resetTimeline();
+  resetPipeline();
+  closeOverlay();
+  updateMarker();
+}
+
+/* ============================== IDLE TIMER ============================== */
+function resetIdle() {
+  clearTimeout(idleTimer);
+  if (autoplayActive) return;          /* the auto-play loop is its own attract mode */
+  idleTimer = setTimeout(() => {
+    resetAll();
+    goToScene(0, -1);
+    startAutoplay();
+  }, IDLE_MS);
+  resetCursorHide();
+}
+
+/* ============================== CURSOR HIDE ============================== */
+function resetCursorHide() {
+  document.body.classList.remove('cursor-hidden');
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => document.body.classList.add('cursor-hidden'), 5000);
+}
+
+/* ============================== KEYBOARD ============================== */
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'Right') {
+    if (currentScene === 0) goToScene(1, 1);
+    else if (currentScene < TOTAL_SCENES - 1) goToScene(currentScene + 1, 1);
+  } else if (e.key === 'ArrowLeft' || e.key === 'Left') {
+    if (currentScene > 1) goToScene(currentScene - 1, -1);
+  } else if (e.key === 'Escape') {
+    closeOverlay();
+  }
+  resetIdle();
+});
+
+/* ============================== GLOBAL EVENTS ============================== */
+['click','touchstart','mousemove','keydown'].forEach(evt => {
+  document.addEventListener(evt, e => { if (e.isTrusted) { resetIdle(); resetCursorHide(); } }, { passive: true });
+});
+
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ============================== AUTOPLAY ============================== */
+let autoplayActive = false;
+let autoSteps = [];
+let autoIdx = 0;
+let autoTimeout = null;
+const autoCursor = $('#autoCursor');
+const autoplayBtn = $('#autoplayBtn');
+
+const MOVE_MS = 1200;
+const CLICK_PAUSE = 400;
+
+function buildAutoScript() {
+  return [
+    { wait: 3500, moveTo: '.attract-content h1', click: true },
+    { wait: 2200, moveTo: '.lib-tile[data-lib="commons-lang3"]', click: true },
+    { wait: 2500, moveTo: '.layer-runtime', click: true },
+    { wait: 2200, action: 'closeOverlay' },
+    { wait: 1200, moveTo: '#nextBtn', click: true },
+    { wait: 5500, moveTo: '.stat-tile[data-detail="stat_f5"]', click: true },
+    { wait: 2000, action: 'closeOverlay' },
+    { wait: 1200, moveTo: '#nextBtn', click: true },
+    { wait: 2000, moveTo: '.choice-card[data-choice="1"]', click: true },
+    { wait: 2200, action: 'closeOverlay' },
+    { wait: 1200, moveTo: '.choice-card[data-choice="3"]', click: true },
+    { wait: 2200, action: 'closeOverlay' },
+    { wait: 1500, moveTo: '#ctaFourthWay', click: true },
+    { wait: 2000, moveTo: '.phase-node[data-phase="2"]', click: true },
+    { wait: 2200, action: 'closeOverlay' },
+    { wait: 1000, moveTo: '.phase-node[data-phase="5"]', click: true },
+    { wait: 2200, action: 'closeOverlay' },
+    { wait: 1200, moveTo: '.repo-toggle-btn[data-repo="validated"]', click: true },
+    { wait: 2200, moveTo: '.repo-toggle-btn[data-repo="remediated"]', click: true },
+    { wait: 2200, moveTo: '#nextBtn', click: true },
+    { wait: 1800, moveTo: '#sendFixBtn', click: true },
+    { wait: 7000, moveTo: '.station[data-station="2"]', click: true },
+    { wait: 2200, action: 'closeOverlay' },
+    { wait: 1200, moveTo: '#nextBtn', click: true },
+    { wait: 1800, moveTo: '#benefitToggle', click: true },
+    { wait: 2500, moveTo: '.flip-card[data-benefit="0"]', click: true },
+    { wait: 2000, action: 'closeOverlay' },
+    { wait: 1200, moveTo: '#nextBtn', click: true },
+    { wait: 2000, moveTo: '.offer-card.offer-network', click: true },
+    { wait: 2500, action: 'closeOverlay' },
+    { wait: 2000, moveTo: '#restartBtn', click: true },
+    { wait: 2000, action: 'restart' }
+  ];
+}
+
+function moveCursorTo(el) {
+  if (!el) return;
+  const r = stageRect(el);
+  autoCursor.style.left = (r.left + r.width / 2) + 'px';
+  autoCursor.style.top = (r.top + r.height / 2) + 'px';
+}
+
+function simulateClick(el) {
+  if (!el) return;
+  autoCursor.classList.add('clicking');
+  setTimeout(() => autoCursor.classList.remove('clicking'), 350);
+  el.click();
+}
+
+function runAutoStep() {
+  if (!autoplayActive || autoIdx >= autoSteps.length) {
+    if (autoplayActive) {
+      autoIdx = 0;
+      autoSteps = buildAutoScript();
+      runAutoStep();
+    }
+    return;
+  }
+  const step = autoSteps[autoIdx];
+  autoIdx++;
+
+  autoTimeout = setTimeout(() => {
+    if (!autoplayActive) return;
+
+    if (step.action === 'closeOverlay') {
+      closeOverlay();
+      runAutoStep();
+      return;
+    }
+    if (step.action === 'restart') {
+      resetAll();
+      goToScene(0, -1);
+      autoIdx = 0;
+      autoSteps = buildAutoScript();
+      autoTimeout = setTimeout(() => { if (autoplayActive) runAutoStep(); }, 2000);
+      return;
+    }
+
+    if (step.moveTo) {
+      const el = document.querySelector(step.moveTo);
+      if (!el) { runAutoStep(); return; }
+      moveCursorTo(el);
+      if (step.click) {
+        autoTimeout = setTimeout(() => {
+          if (!autoplayActive) return;
+          simulateClick(el);
+          autoTimeout = setTimeout(() => { if (autoplayActive) runAutoStep(); }, CLICK_PAUSE);
+        }, MOVE_MS + 200);
+      } else {
+        autoTimeout = setTimeout(() => { if (autoplayActive) runAutoStep(); }, MOVE_MS + 200);
+      }
+      return;
+    }
+
+    runAutoStep();
+  }, step.wait);
+}
+
+function startAutoplay() {
+  autoplayActive = true;
+  clearTimeout(idleTimer);
+  document.body.classList.add('cursor-hidden');
+  autoIdx = 0;
+  autoSteps = buildAutoScript();
+  autoCursor.classList.add('visible');
+  autoCursor.style.left = '960px';
+  autoCursor.style.top = '540px';
+  updateAutoplayBtn();
+  runAutoStep();
+}
+
+function stopAutoplay() {
+  autoplayActive = false;
+  clearTimeout(autoTimeout);
+  autoCursor.classList.remove('visible', 'clicking');
+  updateAutoplayBtn();
+  resetIdle();
+}
+
+function updateAutoplayBtn() {
+  const iconEl = autoplayBtn.querySelector('.ap-icon');
+  const labelEl = autoplayBtn.querySelector('[data-i18n]');
+  if (autoplayActive) {
+    iconEl.textContent = '⏸';
+    labelEl.dataset.i18n = 'ap_manual';
+    labelEl.textContent = T[lang].ap_manual;
+  } else {
+    iconEl.textContent = '▶';
+    labelEl.dataset.i18n = 'ap_auto';
+    labelEl.textContent = T[lang].ap_auto;
+  }
+}
+
+autoplayBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  if (autoplayActive) stopAutoplay(); else startAutoplay();
+});
+
+['touchstart','mousedown'].forEach(evt => {
+  document.addEventListener(evt, e => {
+    if (!autoplayActive) return;
+    if (e.target === autoplayBtn || autoplayBtn.contains(e.target)) return;
+    if (e.target.closest && e.target.closest('#langSwitch')) return;
+    stopAutoplay();
+  }, { passive: true, capture: true });
+});
+document.addEventListener('keydown', e => {
+  if (autoplayActive && e.key !== 'Escape') { stopAutoplay(); }
+}, { capture: true });
+
+/* ============================== INIT ============================== */
+function init() {
+  fitStage();
+  buildPackagesFlow();
+  buildLibsGrid();
+  buildStepper();
+  buildDots();
+  updateNav();
+  applyLang();
+  applyRepo('remediated');
+  updateBenefitSummary();
+  updateMood(0);
+  resetCursorHide();
+  startAutoplay();
+}
+
+init();
+
+})();
+</script>
+</body>
+</html>
