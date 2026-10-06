@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920,initial-scale=1">
 <title>Red Hat Lightwell — Životní cyklus aplikace</title>
+<meta name="version" content="1.1">
 <style>
 :root {
   --bg: #151515;
@@ -147,12 +148,17 @@ main {
   padding: 64px 80px 120px;
   opacity: 0;
   transform: translateX(30px);
-  transition: opacity var(--transition), transform var(--transition);
+  /* Inactive scenes become visibility:hidden once their fade-out ends, so a stale
+     inline opacity can never make two scenes show at the same time */
+  visibility: hidden;
+  transition: opacity 300ms ease-out, transform 300ms ease-out, visibility 0s linear 300ms;
   pointer-events: none;
   will-change: opacity, transform;
 }
 .scene.active {
   opacity: 1; transform: translateX(0);
+  visibility: visible;
+  transition: opacity 300ms ease-out, transform 300ms ease-out, visibility 0s;
   pointer-events: auto;
 }
 
@@ -309,6 +315,31 @@ main {
   z-index: 80;
   pointer-events: none;
 }
+
+#appVersion {
+  position: fixed; right: 20px; bottom: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.35);
+  z-index: 81; pointer-events: none;
+}
+
+/* ===================== BRAND LOGO ===================== */
+#brandBox { display: flex; align-items: center; gap: 16px; pointer-events: none !important; }
+#brandBox #homeBtn { pointer-events: auto; }   /* only the Home button takes taps; the logo lets them through */
+#brandLogo {
+  height: 40px; width: auto; max-width: 220px;
+  object-fit: contain; border-radius: 6px; display: block;
+  transition: opacity var(--transition);
+}
+#topBar.hidden-bar #brandLogo { opacity: 0; }   /* the attract scene shows the large logo */
+.attract-logo {
+  display: block; margin: 0 auto 24px;
+  height: 96px; width: auto; max-width: 520px;
+  object-fit: contain; border-radius: 10px;
+}
+.attract-content.has-logo .attract-brand,
+.attract-content.has-logo .attract-hero { display: none; }
+.logo-missing { display: none !important; }
 
 /* ===================== COMMON COMPONENTS ===================== */
 .card {
@@ -1263,9 +1294,12 @@ main {
 
 <!-- TOP BAR -->
 <header id="topBar" class="hidden-bar">
+  <div id="brandBox">
+  <img id="brandLogo" src="lightwell-logo.jpeg" alt="Red Hat Lightwell">
   <button id="homeBtn" aria-label="Home">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 001 1h3v-6h6v6h3a1 1 0 001-1V10"/></svg>
   </button>
+  </div>
   <div style="display:flex;align-items:center;gap:12px">
     <button id="autoplayBtn"><span class="ap-icon">▶</span> <span data-i18n="ap_auto">Automaticky přehrát</span></button>
     <div id="langSwitch" role="group" aria-label="Language"><button data-lang="cs" class="active">CZ</button><button data-lang="sk">SK</button><button data-lang="pl">PL</button><button data-lang="ro">RO</button><button data-lang="en">EN</button></div>
@@ -1294,6 +1328,7 @@ main {
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
         </div>
       </div>
+      <img class="attract-logo" id="attractLogo" src="lightwell-logo.jpeg" alt="Red Hat Lightwell">
       <div class="attract-brand">RED HAT LIGHTWELL</div>
       <h1 data-i18n="s0_title">Z čeho je postavená vaše aplikace?</h1>
       <p class="attract-sub" data-i18n="s0_sub">Interaktivní demo · Red Hat Lightwell</p>
@@ -1658,6 +1693,7 @@ main {
 </nav>
 
 <!-- FOOTER -->
+<div id="appVersion">Lightwell Demo v1.1</div>
 <footer id="disclaimer" data-i18n="disclaimer">Ilustrativní demo pro diskuzi na stánku · není oficiální dokumentace Red Hat</footer>
 </div><!-- /stage -->
 
@@ -2580,19 +2616,23 @@ function goToScene(n, dir) {
   prev.classList.remove('active');
   prev.style.transform = direction > 0 ? 'translateX(-30px)' : 'translateX(30px)';
   prev.style.opacity = '0';
-  setTimeout(() => {
-    prev.style.transform = '';
-    prev.style.opacity = '';
-  }, 400);
 
   next.style.transform = direction > 0 ? 'translateX(30px)' : 'translateX(-30px)';
   next.style.opacity = '0';
   void next.offsetWidth;
   next.classList.add('active');
-  requestAnimationFrame(() => {
+
+  /* Only the latest transition may finish. When the window is hidden the browser
+     queues animation frames; a stale frame must not re-show an old scene. */
+  cancelAnimationFrame(sceneRaf);
+  const target = n;
+  sceneRaf = requestAnimationFrame(() => {
+    if (currentScene !== target) return;
     next.style.transform = 'translateX(0)';
     next.style.opacity = '1';
   });
+  clearTimeout(sceneSweepTimer);
+  sceneSweepTimer = setTimeout(sweepScenes, 400);
 
   currentScene = n;
   closeOverlay();
@@ -2601,6 +2641,15 @@ function goToScene(n, dir) {
   updateMood(n);
   onSceneEnter(n);
   resetIdle();
+}
+
+/* Inactive scenes carry no inline styles; the active one is fully shown */
+let sceneRaf = 0, sceneSweepTimer = 0;
+function sweepScenes() {
+  scenes.forEach((sc, i) => {
+    if (i === currentScene) { sc.style.transform = 'translateX(0)'; sc.style.opacity = '1'; }
+    else { sc.style.transform = ''; sc.style.opacity = ''; }
+  });
 }
 
 function updateMood(n) {
@@ -3185,8 +3234,38 @@ document.addEventListener('keydown', e => {
   if (autoplayActive && e.key !== 'Escape') { stopAutoplay(); }
 }, { capture: true });
 
+/* ============================== VISIBILITY ============================== */
+/* Screen saver, minimised or covered window: stop the loop while nobody can see it,
+   start from the attract scene when the screen is visible again. */
+let resumeAutoplayOnShow = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    resumeAutoplayOnShow = autoplayActive;
+    if (autoplayActive) stopAutoplay();
+    clearTimeout(idleTimer);
+  } else {
+    sweepScenes();
+    if (resumeAutoplayOnShow || currentScene === 0) goHome();
+    else resetIdle();
+    resumeAutoplayOnShow = false;
+  }
+});
+
 /* ============================== INIT ============================== */
+/* Logo file sits next to index.html (lightwell-logo.jpeg). If it is missing,
+   the app falls back to the text badge and shield, so it never shows a broken image. */
+function setupLogo() {
+  const big = $('#attractLogo'), small = $('#brandLogo'), box = $('.attract-content');
+  function ok() { box.classList.add('has-logo'); big.classList.remove('logo-missing'); small.classList.remove('logo-missing'); }
+  function missing() { box.classList.remove('has-logo'); big.classList.add('logo-missing'); small.classList.add('logo-missing'); }
+  big.addEventListener('load', ok);
+  big.addEventListener('error', missing);
+  small.addEventListener('error', () => small.classList.add('logo-missing'));
+  if (big.complete) { (big.naturalWidth > 0) ? ok() : missing(); }
+}
+
 function init() {
+  setupLogo();
   fitStage();
   buildPackagesFlow();
   buildLibsGrid();
