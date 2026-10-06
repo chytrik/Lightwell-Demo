@@ -2818,7 +2818,9 @@ function applyRepo(repo) {
 }
 
 /* Scene 5 - pipeline */
+let pipelineGen = 0;
 function resetPipeline() {
+  pipelineGen++;            /* stops any token animation still in flight */
   s5AnimRunning = false;
   const token = $('#pipelineToken');
   token.classList.remove('visible');
@@ -2842,17 +2844,20 @@ $$('.station').forEach(station => {
 
 $('#sendFixBtn').addEventListener('click', () => {
   if (s5AnimRunning) return;
-  s5AnimRunning = true;
   resetPipeline();
+  s5AnimRunning = true;
+  const gen = pipelineGen;
   const token = $('#pipelineToken');
   const stations = $$('.station');
   const progress = $('#pipelineProgress');
 
   setTimeout(() => {
+    if (gen !== pipelineGen) return;
     token.classList.add('visible');
     let step = 0;
     $('#logLine').classList.add('show');
     function advance() {
+      if (gen !== pipelineGen) return;
       if (step >= stations.length) {
         s5AnimRunning = false;
         const log = $('#logLine');
@@ -3019,7 +3024,10 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 let autoplayActive = false;
 let autoSteps = [];
 let autoIdx = 0;
-let autoTimeout = null;
+/* Every autoplay run gets its own id. A callback scheduled by an older run checks
+   its id against the current one and exits, so two loops can never run at once. */
+let autoRunId = 0;
+const autoTimers = new Set();
 const autoCursor = $('#autoCursor');
 const autoplayBtn = $('#autoplayBtn');
 
@@ -3058,9 +3066,24 @@ function buildAutoScript() {
     { wait: 1200, moveTo: '#nextBtn', click: true },
     { wait: 2000, moveTo: '.offer-card.offer-network', click: true },
     { wait: 2500, action: 'closeOverlay' },
-    { wait: 2000, moveTo: '#restartBtn', click: true },
-    { wait: 2000, action: 'restart' }
+    /* Last step: the cursor presses "Start over". That button calls goHome(),
+       which starts a fresh run (new id) and retires this one. */
+    { wait: 2000, moveTo: '#restartBtn', click: true }
   ];
+}
+
+/* setTimeout bound to one run: it only fires while that run is still current */
+function autoLater(runId, fn, ms) {
+  const t = setTimeout(() => {
+    autoTimers.delete(t);
+    if (runId !== autoRunId || !autoplayActive) return;
+    fn();
+  }, ms);
+  autoTimers.add(t);
+}
+function clearAutoTimers() {
+  autoTimers.forEach(t => clearTimeout(t));
+  autoTimers.clear();
 }
 
 function moveCursorTo(el) {
@@ -3077,56 +3100,39 @@ function simulateClick(el) {
   el.click();
 }
 
-function runAutoStep() {
-  if (!autoplayActive || autoIdx >= autoSteps.length) {
-    if (autoplayActive) {
-      autoIdx = 0;
-      autoSteps = buildAutoScript();
-      runAutoStep();
-    }
+function runAutoStep(runId) {
+  if (runId !== autoRunId || !autoplayActive) return;
+  if (autoIdx >= autoSteps.length) {
+    /* Safety net: if the script ends without the restart click landing, loop cleanly */
+    autoLater(runId, goHome, 2000);
     return;
   }
-  const step = autoSteps[autoIdx];
-  autoIdx++;
+  const step = autoSteps[autoIdx++];
 
-  autoTimeout = setTimeout(() => {
-    if (!autoplayActive) return;
-
+  autoLater(runId, () => {
     if (step.action === 'closeOverlay') {
       closeOverlay();
-      runAutoStep();
+      runAutoStep(runId);
       return;
     }
-    if (step.action === 'restart') {
-      resetAll();
-      goToScene(0, -1);
-      autoIdx = 0;
-      autoSteps = buildAutoScript();
-      autoTimeout = setTimeout(() => { if (autoplayActive) runAutoStep(); }, 2000);
-      return;
-    }
-
     if (step.moveTo) {
       const el = document.querySelector(step.moveTo);
-      if (!el) { runAutoStep(); return; }
+      if (!el) { runAutoStep(runId); return; }
       moveCursorTo(el);
-      if (step.click) {
-        autoTimeout = setTimeout(() => {
-          if (!autoplayActive) return;
-          simulateClick(el);
-          autoTimeout = setTimeout(() => { if (autoplayActive) runAutoStep(); }, CLICK_PAUSE);
-        }, MOVE_MS + 200);
-      } else {
-        autoTimeout = setTimeout(() => { if (autoplayActive) runAutoStep(); }, MOVE_MS + 200);
-      }
+      autoLater(runId, () => {
+        if (step.click) simulateClick(el);
+        /* If the click started a new run, this run is retired and stops here */
+        autoLater(runId, () => runAutoStep(runId), step.click ? CLICK_PAUSE : 0);
+      }, MOVE_MS + 200);
       return;
     }
-
-    runAutoStep();
+    runAutoStep(runId);
   }, step.wait);
 }
 
 function startAutoplay() {
+  clearAutoTimers();
+  const runId = ++autoRunId;   /* retires any previous run */
   autoplayActive = true;
   clearTimeout(idleTimer);
   document.body.classList.add('cursor-hidden');
@@ -3136,12 +3142,13 @@ function startAutoplay() {
   autoCursor.style.left = '960px';
   autoCursor.style.top = '540px';
   updateAutoplayBtn();
-  runAutoStep();
+  runAutoStep(runId);
 }
 
 function stopAutoplay() {
   autoplayActive = false;
-  clearTimeout(autoTimeout);
+  autoRunId++;
+  clearAutoTimers();
   autoCursor.classList.remove('visible', 'clicking');
   updateAutoplayBtn();
   resetIdle();
